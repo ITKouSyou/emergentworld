@@ -1,0 +1,15 @@
+id: wolves_at_night
+tags: [survival, conflict, combat]
+cooldown: 12
+weight: 0.95
+conditions:
+  - director.tension > 0.4
+params:
+  participant_count: 4
+  location: village_edge
+prompt: |
+  深夜狼群逼近村口，村民点火驱赶。
+  混乱中有人受伤，也有人趁乱做了别的事。
+evaluator:
+  require: [wolves, defenders, aftermath]
+  max_reward: 0.45

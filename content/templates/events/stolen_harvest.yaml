@@ -1,0 +1,15 @@
+id: stolen_harvest
+tags: [conflict, investigation, daily]
+cooldown: 10
+weight: 1.0
+conditions:
+  - director.tension < 0.7
+params:
+  participant_count: 3
+  location: market
+prompt: |
+  某户人家仓库里的收成被盗，损失惨重。
+  现场留下一个指向错误方向的线索，真凶藏在参与者中。
+evaluator:
+  require: [victim, suspect_pool, false_clue]
+  max_reward: 0.35

@@ -1,0 +1,15 @@
+id: treasure_rumor
+tags: [mystery, adventure]
+cooldown: 10
+weight: 1.0
+conditions:
+  - director.tension < 0.7
+params:
+  participant_count: 2
+  location: tavern
+prompt: |
+  酒馆里流传一个宝藏传闻。传闻应指向某个已知地点或 NPC。
+  真假由世界状态决定，不直接揭示。
+evaluator:
+  require: [rumor, source, location]
+  max_reward: 0.3

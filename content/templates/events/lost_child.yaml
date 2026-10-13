@@ -1,0 +1,15 @@
+id: lost_child
+tags: [investigation, social]
+cooldown: 9
+weight: 1.0
+conditions:
+  - location.has_people >= 4
+params:
+  participant_count: 3
+  location: village_square
+prompt: |
+  一个孩子走失了，村里人开始寻找。
+  线索指向某个隐蔽地点，参与者对其态度各异。
+evaluator:
+  require: [child, search_party, clue]
+  max_reward: 0.3

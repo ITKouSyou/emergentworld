@@ -1,0 +1,490 @@
+"""事件流程：包含相关性判定 + 属性判定 + 玩家参与。
+
+流程：
+    1. Director 选模板
+    2. Generator 生成事件
+    3. 相关性判定：
+        相关 → awaiting_player，等玩家抉择
+        不相关 → 立即 resolved，作为"消息"
+    4. 玩家选择后：
+        属性判定 → 结果 quality
+        LLM 根据 quality 生成结算文本
+        应用奖励、经验、关系变化
+"""
+
+from __future__ import annotations
+
+import random
+from typing import Optional
+
+from sqlmodel import Session, select
+
+from server.core import director
+from server.core.choices import build_choices, get_choice_spec
+from server.core.evaluator import evaluate_event, evaluate_reward, log_evaluation
+from server.core.world import load_npcs, save_event, save_world
+from server.generators.base import get_llm, load_prompt
+from server.generators.event import fill_event
+from server.generators.reward import compute_budget, generate_reward
+from server.models.db import EventRow, ItemRow, RewardRow, dumps
+from server.models.schemas import Event, EventTemplate, Reward, World
+from server.systems import player as player_sys
+from server.systems import relationship
+from server.systems.relevance import check_relevance
+
+PLAYER_TIMEOUT_TICKS = 8
+MAX_PENDING = 3
+
+
+def _save_reward(session: Session, reward: Reward) -> None:
+    row = RewardRow(
+        id=reward.id,
+        event_id=reward.event_id,
+        kind=reward.kind,
+        value=reward.value,
+        description=reward.description,
+        payload_json=dumps({k: v for k, v in reward.payload.items() if k != "item"}),
+    )
+    session.add(row)
+    session.commit()
+
+
+def _save_item(
+    session: Session,
+    reward_id: str,
+    event_id: str,
+    item_data: dict,
+    owner_id: str,
+) -> None:
+    row = ItemRow(
+        id=item_data["id"],
+        reward_id=reward_id,
+        event_id=event_id,
+        name=item_data.get("name", ""),
+        kind=item_data.get("kind", ""),
+        affixes_json=dumps(item_data.get("affixes", [])),
+        story=item_data.get("story", ""),
+        value=float(item_data.get("value", 0.0)),
+        owner_id=owner_id,
+        consumed=False,
+    )
+    session.add(row)
+    session.commit()
+
+
+def _apply_initial_effects(
+    session: Session,
+    world: World,
+    event: Event,
+    tpl: EventTemplate,
+    rng: random.Random,
+) -> None:
+    summary = event.payload.get("summary", "") or ("发生了 %s" % tpl.id)
+    relationship.npc_effects_from_event(
+        session=session,
+        participants=event.participants,
+        event_id=event.id,
+        summary=summary,
+        timestamp=world.tick,
+        rng=rng,
+    )
+    relationship.apply_event_effects(
+        session=session,
+        participants=event.participants,
+        tags=tpl.tags,
+        rng=rng,
+    )
+
+
+def _pending_rows(session: Session) -> list[EventRow]:
+    return list(session.exec(
+        select(EventRow).where(EventRow.state == "awaiting_player")
+    ).all())
+
+
+def _resolve_item_owner(event: Event, choice_id: str, rng: random.Random) -> str:
+    if choice_id == "oppose":
+        return "player"
+    if choice_id == "help":
+        if event.participants:
+            return event.participants[0]
+        return ""
+    if event.participants and rng.random() < 0.8:
+        return rng.choice(event.participants)
+    return "player"
+
+
+async def _emit_reward_and_item(
+    session: Session,
+    world: World,
+    event: Event,
+    rng: random.Random,
+    value_multiplier: float = 1.0,
+    owner_hint: str | None = None,
+) -> tuple[str | None, str | None, str | None]:
+    budget = compute_budget(event, world) * value_multiplier
+    reward = await generate_reward(event, world)
+    reward.value = min(reward.value * value_multiplier, 1.0)
+
+    reward_ok, reward_errors = evaluate_reward(reward, budget)
+    log_evaluation(session, "reward", reward.id, reward_ok, reward_errors)
+    if not reward_ok:
+        return None, None, None
+
+    _save_reward(session, reward)
+    reward_id = reward.id
+    item_id = None
+    item_owner = None
+
+    item_data = reward.payload.get("item")
+    if isinstance(item_data, dict) and item_data.get("id"):
+        if owner_hint is None:
+            item_owner = _resolve_item_owner(event, "observe", rng)
+        else:
+            item_owner = owner_hint
+        _save_item(session, reward.id, event.id, item_data, item_owner)
+        item_id = item_data["id"]
+
+    return reward_id, item_id, item_owner
+
+
+async def run_event_cycle(
+    session: Session,
+    world: World,
+    templates: list[EventTemplate],
+    force: bool = False,
+) -> Optional[Event]:
+    rng = random.Random(world.seed * 1000003 + world.tick)
+
+    pending = _pending_rows(session)
+    if len(pending) >= MAX_PENDING:
+        return None
+
+    if not force and not director.should_trigger(world, rng):
+        return None
+
+    npcs = load_npcs(session)
+    if len(npcs) < 1:
+        return None
+
+    player = player_sys.load_player(session)
+    pending_template_ids = {r.template_id for r in pending}
+
+    tpl = director.pick_template(
+        templates, world, npcs, rng,
+        ignore_cooldown=force,
+        pending_template_ids=pending_template_ids,
+    )
+    if tpl is None:
+        if pending_template_ids:
+            tpl = director.pick_template(
+                templates, world, npcs, rng,
+                ignore_cooldown=False,
+                pending_template_ids=pending_template_ids,
+                want_interactive=False,
+            )
+        if tpl is None:
+            return None
+
+    event = await fill_event(tpl, world, npcs, rng, player=player)
+    event.payload["interactive"] = bool(tpl.interactive)
+
+    npc_ids = {n.id for n in npcs}
+    max_reward = float(tpl.evaluator.get("max_reward", 1.0)) if tpl.evaluator else 1.0
+    ok, errors = evaluate_event(event, world, npc_ids, budget=max_reward)
+    log_evaluation(session, "event", event.id, ok, errors)
+
+    if not ok:
+        event.state = "rejected"
+        save_event(session, event)
+        director.update_tension_after_event(world, event, tpl)
+        save_world(session, world)
+        return None
+
+    # 相关性判定
+    relevance_ok = False
+    relevance_score = 0.0
+    relevance_detail: dict = {}
+    if tpl.interactive and player is not None:
+        relevance_ok, relevance_score, relevance_detail = check_relevance(
+            session, event, tpl, world, player, npcs,
+        )
+
+    event.payload["relevance_score"] = round(relevance_score, 3)
+    event.payload["relevance_detail"] = relevance_detail
+
+    # ============================================================
+    # 分支 A：非交互 或 与玩家无关 → 消息，直接结算
+    # ============================================================
+    if (not tpl.interactive) or (not relevance_ok):
+        event.state = "active"
+        save_event(session, event)
+
+        _apply_initial_effects(session, world, event, tpl, rng)
+
+        reward_id, item_id, item_owner = await _emit_reward_and_item(
+            session, world, event, rng, value_multiplier=1.0,
+        )
+        event.payload["reward_id"] = reward_id
+        event.payload["item_id"] = item_id
+        event.payload["item_owner"] = item_owner
+        event.payload["as_message"] = True
+
+        event.state = "resolved"
+        event.resolved_at = world.tick
+        save_event(session, event)
+
+        director.update_tension_after_event(world, event, tpl)
+        save_world(session, world)
+        return event
+
+    # ============================================================
+    # 分支 B：与玩家相关 → 等待玩家抉择
+    # ============================================================
+    event.payload["choices"] = build_choices(tpl)
+    event.payload["choice_made"] = None
+    event.payload["tpl_tags"] = list(tpl.tags)
+    event.payload["max_reward"] = max_reward
+    event.payload["difficulty"] = 0.5
+    event.payload["as_message"] = False
+
+    event.state = "awaiting_player"
+    save_event(session, event)
+
+    _apply_initial_effects(session, world, event, tpl, rng)
+
+    # 认识参与者
+    if player is not None:
+        for pid in event.participants:
+            player_sys.learn_about_npc(session, pid)
+
+    save_world(session, world)
+    return event
+
+
+async def _generate_outcome_text(
+    event: Event,
+    choice_id: str,
+    choice_label: str,
+    player,
+    check: dict,
+    attribute_label: str,
+) -> str:
+    prompt = load_prompt("event_resolve.md").format(
+        summary=event.payload.get("summary", ""),
+        narrative=event.payload.get("narrative", ""),
+        player_name=player.name if player else "无名者",
+        choice_id=choice_id,
+        choice_label=choice_label,
+        attribute_label=attribute_label,
+        attribute_value=check["base"],
+        roll=check["roll"],
+        total=check["total"],
+        threshold=check["threshold"],
+        result=check["result"],
+    )
+    try:
+        raw = await get_llm().text_json(prompt)
+        if isinstance(raw, dict):
+            outcome = str(raw.get("outcome", "")).strip()
+            epilogue = str(raw.get("epilogue", "")).strip()
+            if outcome:
+                return (outcome + " " + epilogue).strip() if epilogue else outcome
+    except Exception:
+        pass
+    # fallback
+    result_zh = {
+        "critical": "你出色地处理了此事。",
+        "success": "你顺利处理了此事。",
+        "partial": "此事勉强有了着落。",
+        "failure": "你没能处理好此事。",
+    }.get(check["result"], "")
+    return "%s——%s%s" % (
+        event.payload.get("summary", ""),
+        choice_label,
+        result_zh,
+    )
+
+
+async def resolve_event(
+    session: Session,
+    world: World,
+    event_id: str,
+    choice_id: str,
+) -> dict:
+    row = session.get(EventRow, event_id)
+    if row is None:
+        return {"ok": False, "error": "event not found"}
+    if row.state != "awaiting_player":
+        return {"ok": False, "error": "event not awaiting player (state=%s)" % row.state}
+
+    spec = get_choice_spec(choice_id)
+    if spec is None:
+        return {"ok": False, "error": "unknown choice: %s" % choice_id}
+
+    from server.models.db import loads as _loads
+
+    payload = _loads(row.payload_json) or {}
+    event = Event(
+        id=row.id,
+        template_id=row.template_id,
+        participants=_loads(row.participants_json) or [],
+        location_id=row.location_id,
+        state="awaiting_player",  # type: ignore[arg-type]
+        payload=payload,
+        created_at=row.created_at,
+        resolved_at=None,
+    )
+
+    rng = random.Random(world.seed * 100003 + world.tick)
+
+    # 找 choice 的实际属性（可能被 tag 覆盖）
+    choice_attribute = spec["attribute"]
+    for c in payload.get("choices", []):
+        if isinstance(c, dict) and c.get("id") == choice_id:
+            choice_attribute = str(c.get("attribute", choice_attribute))
+            break
+
+    player = player_sys.load_player(session)
+    if player is None:
+        return {"ok": False, "error": "player not created"}
+
+    # 属性判定
+    check = player_sys.roll_check(player, choice_attribute, spec["difficulty"], rng)
+
+    # 判定结果影响 relation delta 与 reward multiplier 的修正
+    quality_mult = {
+        "critical": 1.5,
+        "success": 1.0,
+        "partial": 0.6,
+        "failure": -0.5,
+    }.get(check["result"], 1.0)
+
+    # 显示用的中文标签
+    from server.core.choices import _attr_label
+    attribute_label = _attr_label(choice_attribute)
+
+    # 生成结算文本
+    choice_label = spec["label"]
+    for c in payload.get("choices", []):
+        if isinstance(c, dict) and c.get("id") == choice_id:
+            choice_label = str(c.get("label", choice_label))
+            break
+
+    outcome_text = await _generate_outcome_text(
+        event, choice_id, choice_label, player, check, attribute_label,
+    )
+
+    # 关系变化
+    for npc_id in event.participants:
+        delta = spec["relation_delta"]
+        mult = 1.0 if quality_mult > 0 else 0.5
+        relationship.adjust(
+            session,
+            from_npc=npc_id,
+            to_npc="player",
+            trust=float(delta.get("trust", 0.0)) * mult,
+            affection=float(delta.get("affection", 0.0)) * mult,
+            fear=float(delta.get("fear", 0.0)) * mult,
+            debt=float(delta.get("debt", 0.0)) * mult,
+        )
+
+    # 张力
+    world.director.tension = max(
+        0.0,
+        min(1.0, world.director.tension + float(spec["tension_delta"])),
+    )
+
+    # 奖励（除 observe 外，即使失败也可能有部分收获）
+    reward_id = None
+    item_id = None
+    item_owner = None
+    if choice_id != "observe":
+        value_mult = float(spec["reward_multiplier"]) * max(0.2, quality_mult)
+        owner_hint = _resolve_item_owner(event, choice_id, rng)
+        reward_id, item_id, item_owner = await _emit_reward_and_item(
+            session, world, event, rng,
+            value_multiplier=value_mult,
+            owner_hint=owner_hint,
+        )
+
+    # 经验与声望
+    exp_gain = int(spec["exp_reward"] * max(0.2, quality_mult))
+    if exp_gain > 0:
+        player_after, leveled = player_sys.add_exp(session, exp_gain)
+    else:
+        player_after, leveled = player, False
+
+    rep_gain = 0
+    if check["result"] in ("critical", "success"):
+        rep_gain = 3 if check["result"] == "success" else 6
+        player_sys.add_reputation(session, rep_gain)
+    elif check["result"] == "failure":
+        player_sys.add_reputation(session, -1)
+
+    # 更新事件
+    payload["choice_made"] = choice_id
+    payload["choice_label"] = choice_label
+    payload["outcome"] = outcome_text
+    payload["reward_id"] = reward_id
+    payload["item_id"] = item_id
+    payload["item_owner"] = item_owner
+    payload["check"] = check
+    payload["exp_gain"] = exp_gain
+    payload["rep_gain"] = rep_gain
+
+    row.state = "resolved"
+    row.resolved_at = world.tick
+    row.payload_json = dumps(payload)
+    session.add(row)
+    session.commit()
+
+    save_world(session, world)
+
+    return {
+        "ok": True,
+        "event_id": event_id,
+        "choice_id": choice_id,
+        "choice_label": choice_label,
+        "outcome": outcome_text,
+        "check": check,
+        "exp_gain": exp_gain,
+        "rep_gain": rep_gain,
+        "leveled_up": leveled,
+        "new_level": player_after.level,
+        "reward_id": reward_id,
+        "item_id": item_id,
+        "item_owner": item_owner,
+    }
+
+
+async def check_timeouts(session: Session, world: World) -> int:
+    from server.models.db import loads as _loads
+
+    rows = session.exec(
+        select(EventRow).where(EventRow.state == "awaiting_player")
+    ).all()
+
+    count = 0
+    for row in rows:
+        if world.tick - row.created_at < PLAYER_TIMEOUT_TICKS:
+            continue
+        try:
+            payload = _loads(row.payload_json) or {}
+            payload["choice_made"] = "observe"
+            payload["choice_label"] = "静观其变（超时）"
+            payload["outcome"] = "%s——你没有介入，事件自行落幕。" % (
+                payload.get("summary", "事件")
+            )
+            payload["timeout"] = True
+            row.state = "expired"
+            row.resolved_at = world.tick
+            row.payload_json = dumps(payload)
+            session.add(row)
+            count += 1
+        except Exception:
+            continue
+
+    if count:
+        session.commit()
+    return count

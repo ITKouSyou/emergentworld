@@ -1,0 +1,15 @@
+id: poisoning_suspected
+tags: [conflict, investigation, plot]
+cooldown: 14
+weight: 0.85
+conditions:
+  - director.tension > 0.5
+params:
+  participant_count: 4
+  location: tavern
+prompt: |
+  一名村民饭后呕吐不止，众人怀疑有人下毒。
+  嫌疑集中在几个在场者身上，真凶身份不明。
+evaluator:
+  require: [victim, suspects, hidden_motive]
+  max_reward: 0.4

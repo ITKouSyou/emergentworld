@@ -1,0 +1,15 @@
+id: wedding
+tags: [celebration, social, romance]
+cooldown: 20
+weight: 0.7
+conditions:
+  - director.tension < 0.4
+params:
+  participant_count: 5
+  location: village_square
+prompt: |
+  两名 NPC 举行婚礼，全村参与。
+  仪式中暴露两人之间的往事或未解的心结。
+evaluator:
+  require: [bride, groom, ceremony_moment]
+  max_reward: 0.4

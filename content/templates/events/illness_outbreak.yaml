@@ -1,0 +1,15 @@
+id: illness_outbreak
+tags: [conflict, survival]
+cooldown: 15
+weight: 0.9
+conditions:
+  - director.tension > 0.5
+params:
+  participant_count: 3
+  location: home
+prompt: |
+  村庄爆发疾病。至少一名 NPC 病倒。
+  事件应引发资源紧张与关系变化。
+evaluator:
+  require: [patients, cause, response]
+  max_reward: 0.4

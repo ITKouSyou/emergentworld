@@ -1,0 +1,16 @@
+id: drought
+tags: [survival, conflict]
+cooldown: 25
+weight: 0.7
+interactive: false
+conditions:
+  - director.tension > 0.5
+params:
+  participant_count: 4
+  location: village_square
+prompt: |
+  久旱无雨，井水渐枯，村民开始焦虑。
+  至少一名 NPC 提出极端建议。
+evaluator:
+  require: [1, 2, 3]
+  max_reward: 0.5

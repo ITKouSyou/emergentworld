@@ -1,0 +1,15 @@
+id: lovers_quarrel
+tags: [social, daily]
+cooldown: 3
+weight: 1.1
+conditions:
+  - director.tension < 0.6
+params:
+  participant_count: 2
+  location: tavern
+prompt: |
+  两名有亲密关系的 NPC 发生争吵，起因与第三方有关。
+  争吵应暴露隐藏关系或目标冲突。
+evaluator:
+  require: [lover_a, lover_b, cause]
+  max_reward: 0.15

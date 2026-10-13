@@ -1,0 +1,15 @@
+id: funeral
+tags: [social, plot, ritual]
+cooldown: 18
+weight: 0.7
+conditions:
+  - director.tension > 0.3
+params:
+  participant_count: 4
+  location: village_edge
+prompt: |
+  一位村民去世，众人送葬。
+  吊唁中揭示死者生前未了的愿望，或某位参与者隐藏的愧疚。
+evaluator:
+  require: [deceased, mourners, unresolved]
+  max_reward: 0.3

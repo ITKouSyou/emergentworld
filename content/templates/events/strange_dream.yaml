@@ -1,0 +1,16 @@
+id: strange_dream
+tags: [mystery, daily]
+cooldown: 4
+weight: 1.4
+interactive: false
+conditions:
+  - director.tension < 0.7
+params:
+  participant_count: 2
+  location: home
+prompt: |
+  一名 NPC 做了怪梦，醒来后心神不宁。
+  梦里的场景似乎在预言某件事。
+evaluator:
+  require: [dreamer, dream_image, omen]
+  max_reward: 0.15

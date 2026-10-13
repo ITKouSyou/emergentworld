@@ -1,0 +1,15 @@
+id: found_treasure_map
+tags: [adventure, mystery, plot]
+cooldown: 15
+weight: 0.85
+conditions:
+  - director.tension < 0.7
+params:
+  participant_count: 3
+  location: forest
+prompt: |
+  有人在森林里发现一张残破的地图，标记着一个隐藏位置。
+  地图的真伪无人能辨，参与者对是否结伴寻宝意见不一。
+evaluator:
+  require: [finder, map_feature, disputed_plan]
+  max_reward: 0.35

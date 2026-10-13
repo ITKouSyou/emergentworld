@@ -1,0 +1,52 @@
+# ---------- Python ----------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+.coverage.*
+pip-wheel-metadata/
+
+# ---------- 项目数据 ----------
+data/*.db
+data/*.db-journal
+data/*.db-wal
+data/*.db-shm
+.cache/
+
+# 保留 data 目录本身
+!data/.gitkeep
+
+# ---------- 敏感信息 ----------
+.env
+.env.local
+.env.*.local
+# 注意：.env.example 会被保留（它不含真实 key）
+
+# ---------- 备份 / 日志 ----------
+*.bak
+client/*.bak
+*.log
+
+# ---------- Godot ----------
+client/.godot/
+client/*.import/
+.import/
+
+# ---------- IDE / OS ----------
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---------- 脚手架临时文件（可选）----------
+# 如果你不想把这些临时修复脚本传到仓库，取消下面注释
+# scaffold_*.py
+# fix[0-9]*.py
+# patch[0-9]*.py

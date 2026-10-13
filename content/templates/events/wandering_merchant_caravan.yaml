@@ -1,0 +1,16 @@
+id: wandering_merchant_caravan
+tags: [trade, daily, social]
+cooldown: 8
+weight: 1.1
+interactive: false
+conditions:
+  - director.tension < 0.6
+params:
+  participant_count: 3
+  location: market
+prompt: |
+  一支商队抵达村口，带来稀有货物与远方消息。
+  消息中有一条与某位村民或某件旧事直接相关。
+evaluator:
+  require: [1, 2, 3]
+  max_reward: 0.25

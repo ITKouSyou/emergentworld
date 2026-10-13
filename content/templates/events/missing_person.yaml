@@ -1,0 +1,16 @@
+id: missing_person
+tags: [conflict, investigation]
+cooldown: 5
+weight: 1.0
+conditions:
+  - location.has_people >= 5
+  - director.tension < 0.7
+params:
+  participant_count: 3
+  location: village_square
+prompt: |
+  生成一个失踪事件。受害者与嫌疑人有隐藏关系。
+  事件必须符合世界当前势力、地点、NPC 记忆。
+evaluator:
+  require: [victim, suspect, location]
+  max_reward: 0.3

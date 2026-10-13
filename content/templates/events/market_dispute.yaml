@@ -1,0 +1,16 @@
+id: market_dispute
+tags: [conflict, daily, trade]
+cooldown: 3
+weight: 1.5
+interactive: false
+conditions:
+  - director.tension < 0.8
+params:
+  participant_count: 2
+  location: market
+prompt: |
+  买卖双方因价格或成色争执，引得旁人围观。
+  争执背后可能有更深的旧怨。
+evaluator:
+  require: [1, 2, 3]
+  max_reward: 0.15

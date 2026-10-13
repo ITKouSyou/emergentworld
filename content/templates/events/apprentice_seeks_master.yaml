@@ -1,0 +1,15 @@
+id: apprentice_seeks_master
+tags: [social, adventure, daily]
+cooldown: 11
+weight: 0.9
+conditions:
+  - director.tension < 0.6
+params:
+  participant_count: 2
+  location: market
+prompt: |
+  一名年轻 NPC 请求某位老手收自己为徒。
+  老手犹豫，原因与一段旧事或未愈的伤有关。
+evaluator:
+  require: [apprentice, master, hesitation]
+  max_reward: 0.25

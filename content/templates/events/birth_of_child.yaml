@@ -1,0 +1,15 @@
+id: birth_of_child
+tags: [celebration, social, ritual]
+cooldown: 22
+weight: 0.75
+conditions:
+  - director.tension < 0.5
+params:
+  participant_count: 4
+  location: home
+prompt: |
+  村里有人添丁，邻居前来道贺。
+  新生儿的名字或相貌引发一段旧事被提起，气氛微妙。
+evaluator:
+  require: [parents, newborn, past_echo]
+  max_reward: 0.3

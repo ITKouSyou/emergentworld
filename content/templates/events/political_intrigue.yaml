@@ -1,0 +1,15 @@
+id: political_intrigue
+tags: [conflict, plot]
+cooldown: 12
+weight: 0.9
+conditions:
+  - director.tension > 0.4
+params:
+  participant_count: 3
+  location: village_hall
+prompt: |
+  村庄内部出现权力斗争。至少一名 NPC 试图拉拢玩家。
+  事件应改变势力关系。
+evaluator:
+  require: [factions, scheme, target]
+  max_reward: 0.35

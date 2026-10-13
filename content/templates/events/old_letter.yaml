@@ -1,0 +1,15 @@
+id: old_letter
+tags: [mystery, plot, investigation]
+cooldown: 5
+weight: 1.25
+conditions:
+  - director.tension < 0.6
+params:
+  participant_count: 2
+  location: home
+prompt: |
+  一名 NPC 在旧物中发现一封泛黄的信件。
+  信的内容指向世界某段被遗忘的历史，或某人刻意隐瞒的过去。
+evaluator:
+  require: [finder, letter_hint, hidden_truth]
+  max_reward: 0.25

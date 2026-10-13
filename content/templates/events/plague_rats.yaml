@@ -1,0 +1,16 @@
+id: plague_rats
+tags: [survival, conflict, investigation]
+cooldown: 22
+weight: 0.75
+interactive: false
+conditions:
+  - director.tension > 0.4
+params:
+  participant_count: 3
+  location: home
+prompt: |
+  有人在谷仓发现大量死鼠，疑似瘟疫先兆。
+  参与者对是否声张产生分歧。
+evaluator:
+  require: [1, 2, 3]
+  max_reward: 0.45

@@ -1,0 +1,15 @@
+id: natural_disaster
+tags: [survival, conflict]
+cooldown: 25
+weight: 0.8
+conditions:
+  - director.tension > 0.6
+params:
+  participant_count: 5
+  location: village_square
+prompt: |
+  自然灾害袭击村庄。多个 NPC 受影响。
+  事件应显著提升紧张度并改变地形或资源。
+evaluator:
+  require: [disaster_type, affected, aftermath]
+  max_reward: 0.6

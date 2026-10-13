@@ -1,0 +1,15 @@
+id: village_election
+tags: [political, plot, social]
+cooldown: 20
+weight: 0.8
+conditions:
+  - director.tension > 0.4
+params:
+  participant_count: 5
+  location: village_hall
+prompt: |
+  村庄议会长老换届，几位候选人明争暗斗。
+  拉票过程中暴露某人的野心或把柄，玩家会被拉拢。
+evaluator:
+  require: [candidates, scheme, player_hook]
+  max_reward: 0.4

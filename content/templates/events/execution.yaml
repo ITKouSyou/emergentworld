@@ -1,0 +1,15 @@
+id: execution
+tags: [conflict, plot, ritual]
+cooldown: 30
+weight: 0.6
+conditions:
+  - director.tension > 0.75
+params:
+  participant_count: 4
+  location: village_square
+prompt: |
+  村庄对一名罪人公开处刑，全村围观。
+  罪人的最后陈词揭示一段更深的阴谋或冤屈，有人表情异常。
+evaluator:
+  require: [condemned, crime, last_words]
+  max_reward: 0.6

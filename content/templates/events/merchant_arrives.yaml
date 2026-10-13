@@ -1,0 +1,15 @@
+id: merchant_arrives
+tags: [trade, daily]
+cooldown: 4
+weight: 1.2
+conditions:
+  - director.tension < 0.5
+params:
+  participant_count: 2
+  location: market
+prompt: |
+  一名行商抵达村庄，带来稀有物品与外来消息。
+  消息应与某个 NPC 的目标或记忆相关。
+evaluator:
+  require: [merchant, item, rumor]
+  max_reward: 0.2

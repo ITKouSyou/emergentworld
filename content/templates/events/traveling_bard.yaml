@@ -1,0 +1,16 @@
+id: traveling_bard
+tags: [social, celebration, daily]
+cooldown: 7
+weight: 1.1
+interactive: false
+conditions:
+  - director.tension < 0.6
+params:
+  participant_count: 3
+  location: tavern
+prompt: |
+  一位流浪诗人来到酒馆，弹唱关于远方与旧事的歌谣。
+  歌词里隐含着某个 NPC 的秘密或渴望。
+evaluator:
+  require: [bard, song_theme, listener]
+  max_reward: 0.2

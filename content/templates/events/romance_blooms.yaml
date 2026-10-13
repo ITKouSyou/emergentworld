@@ -1,0 +1,15 @@
+id: romance_blooms
+tags: [romance, social, daily]
+cooldown: 6
+weight: 1.3
+conditions:
+  - director.tension < 0.5
+params:
+  participant_count: 2
+  location: forest
+prompt: |
+  两名 NPC 在僻静处相遇，情愫暗生。
+  其中一人已有婚约或牵挂，气氛因此微妙。
+evaluator:
+  require: [admirer, beloved, obstacle]
+  max_reward: 0.2

@@ -1,0 +1,15 @@
+id: mysterious_stranger
+tags: [mystery, plot]
+cooldown: 12
+weight: 0.9
+conditions:
+  - director.tension > 0.3
+params:
+  participant_count: 2
+  location: forest
+prompt: |
+  一个神秘陌生人出现在村庄附近。其身份与世界某段历史相关。
+  不要直接揭示身份，留下线索。
+evaluator:
+  require: [stranger, clue, hook]
+  max_reward: 0.35
