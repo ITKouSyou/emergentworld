@@ -40,7 +40,7 @@ def generate_schedule(npc: NPC, rng: random.Random) -> dict[str, str]:
 
     # --- 白天（morning + afternoon）---
     if is_child:
-        day_loc = "village_square"
+        day_loc = rng.choice(["village_square", "orchard", "brook", "mill", "well"])
     elif is_elder:
         day_loc = rng.choice(["home", "village_square", "market"])
     elif any(kw in goals_text for kw in ["钱", "wealth", "攒", "生意", "商"]):
@@ -51,9 +51,16 @@ def generate_schedule(npc: NPC, rng: random.Random) -> dict[str, str]:
         day_loc = "market"
     else:
         if openness > 0.6:
-            day_loc = rng.choice(["forest", "village_square", "market"])
+            day_loc = rng.choice([
+                "forest", "village_square", "market",
+                "brook", "bamboo_grove", "old_road",
+            ])
         else:
-            day_loc = rng.choice(["market", "home", "village_hall"])
+            day_loc = rng.choice([
+                "market", "home", "village_hall",
+                "mill", "smithy", "dye_works",
+                "farm_field", "pasture", "well",
+            ])
 
     schedule["morning"] = day_loc
     schedule["afternoon"] = day_loc
@@ -106,6 +113,30 @@ def describe_schedule(npc: NPC) -> list[str]:
         "forest": "森林",
         "village_edge": "村庄边缘",
         "village_hall": "村公所",
+        "well": "井边",
+        "mill": "磨坊",
+        "smithy": "铁匠铺",
+        "dye_works": "染坊",
+        "farm_field": "农田",
+        "orchard": "果园",
+        "pasture": "牧场",
+        "brook": "小溪",
+        "deep_forest": "深山老林",
+        "old_mine": "废弃矿洞",
+        "river_bend": "河湾",
+        "old_shrine": "古庙遗址",
+        "abandoned_farm": "荒废农舍",
+        "mountain_pass": "山道",
+        "waterfall": "瀑布",
+        "cliff": "断崖",
+        "stone_forest": "石林",
+        "old_road": "古道",
+        "ancient_grave": "荒坟",
+        "quarry": "采石场",
+        "salt_flat": "盐碱地",
+        "ferry": "野渡",
+        "bamboo_grove": "竹林",
+        "hot_spring": "温泉",
     }
     result = []
     for slot in ["morning", "afternoon", "evening", "night"]:

@@ -20,6 +20,16 @@ LOCATION_DIFFICULTY = {
     "old_shrine": "hard",
     "abandoned_farm": "easy",
     "mountain_pass": "hard",
+    "waterfall": "normal",
+    "cliff": "hard",
+    "stone_forest": "hard",
+    "old_road": "normal",
+    "ancient_grave": "hard",
+    "quarry": "normal",
+    "salt_flat": "easy",
+    "ferry": "normal",
+    "bamboo_grove": "easy",
+    "hot_spring": "normal",
 }
 
 LOCATION_FLAVORS = {
@@ -29,6 +39,16 @@ LOCATION_FLAVORS = {
     "old_shrine": "残破的神像倒在草丛里，香炉早已冰冷。",
     "abandoned_farm": "农舍的屋顶已经塌了，院里的井还盖着。",
     "mountain_pass": "山风呼啸，一条小径隐没在云雾里。",
+    "waterfall": "水声轰鸣，白练从高处跌落深潭。",
+    "cliff": "陡峭的岩壁直插云霄，脚下是深渊。",
+    "stone_forest": "嶙峋的石柱林立，像是巨人的森林。",
+    "old_road": "青苔覆盖的古道通向远方，车辙已模糊。",
+    "ancient_grave": "荒草掩映的坟冢错落而立，碑上字迹难辨。",
+    "quarry": "采石留下的巨坑里积水成潭，石壁刀削般整齐。",
+    "salt_flat": "白色盐壳覆盖大地，远处的空气扭曲着。",
+    "ferry": "老渡口只剩半截木桩，江水缓缓拍打。",
+    "bamboo_grove": "翠竹成片，风吹过沙沙作响。",
+    "hot_spring": "热气从地表涌起，水面泛着硫磺色的光。",
 }
 
 

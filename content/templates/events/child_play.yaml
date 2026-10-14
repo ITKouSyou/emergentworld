@@ -1,0 +1,16 @@
+id: child_play
+tags: [daily, social, celebration]
+cooldown: 8
+weight: 1.2
+interactive: false
+conditions:
+  - director.tension < 0.6
+params:
+  participant_count: 2
+  location: village_square
+prompt: |
+  几个孩子在广场玩耍。游戏本身没什么特别，
+  但其中一个孩子说的话，让旁边的大人愣了一下。
+evaluator:
+  require: [children, game, strange_words]
+  max_reward: 0.1

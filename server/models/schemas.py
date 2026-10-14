@@ -47,6 +47,7 @@ class Player(BaseModel):
     background: str = ""
     known_npcs: list[str] = Field(default_factory=list)
     factions: dict[str, int] = Field(default_factory=dict)
+    equipment: dict[str, str] = Field(default_factory=dict)   # {weapon: item_id, ...}
     created: bool = False
 
 
@@ -131,9 +132,15 @@ class Item(BaseModel):
     id: str
     name: str
     kind: str
+    category: str = "material"    # consumable / equipment / material / key / quest
     affixes: list[str] = Field(default_factory=list)
     story: str = ""
     value: float = 0.0
+    durability: int = 100
+    max_durability: int = 100
+    use_effect: dict[str, float] = Field(default_factory=dict)   # {"hp": +20, "hunger": -0.3}
+    slot: str = ""                 # weapon / armor / accessory / tool
+    attributes: dict[str, int] = Field(default_factory=dict)
 
 
 class Evaluation(BaseModel):

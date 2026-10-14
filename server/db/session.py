@@ -41,6 +41,14 @@ def ensure_schema() -> None:
         # item
         _add_col(conn, "item", "owner_id", "owner_id TEXT NOT NULL DEFAULT ''")
         _add_col(conn, "item", "consumed", "consumed INTEGER NOT NULL DEFAULT 0")
+        _add_col(conn, "item", "durability", "durability INTEGER NOT NULL DEFAULT 100")
+        _add_col(conn, "item", "max_durability", "max_durability INTEGER NOT NULL DEFAULT 100")
+        _add_col(conn, "item", "category", "category TEXT NOT NULL DEFAULT 'material'")
+        _add_col(conn, "item", "use_effect_json", "use_effect_json TEXT NOT NULL DEFAULT '{}'")
+        _add_col(conn, "item", "slot", "slot TEXT NOT NULL DEFAULT ''")
+        _add_col(conn, "item", "attributes_json", "attributes_json TEXT NOT NULL DEFAULT '{}'")
+        _add_col(conn, "quest", "require_item_kind", "require_item_kind TEXT NOT NULL DEFAULT ''")
+        _add_col(conn, "quest", "require_item_count", "require_item_count INTEGER NOT NULL DEFAULT 0")
         # memory
         _add_col(conn, "memory", "embedding_json", "embedding_json TEXT NOT NULL DEFAULT '[]'")
         # npc
@@ -51,6 +59,7 @@ def ensure_schema() -> None:
         _add_col(conn, "npc", "faction", "faction TEXT NOT NULL DEFAULT 'neutral'")
         _add_col(conn, "player", "money", "money INTEGER NOT NULL DEFAULT 0")
         _add_col(conn, "player", "factions_json", "factions_json TEXT NOT NULL DEFAULT '{}'")
+        _add_col(conn, "player", "equipment_json", "equipment_json TEXT NOT NULL DEFAULT '{}'")
         # world
         _add_col(conn, "world", "season", "season TEXT NOT NULL DEFAULT 'spring'")
         _add_col(conn, "world", "weather", "weather TEXT NOT NULL DEFAULT 'clear'")

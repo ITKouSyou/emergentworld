@@ -1,0 +1,16 @@
+id: land_dispute
+tags: [conflict, political, plot]
+cooldown: 18
+weight: 0.9
+interactive: true
+conditions:
+  - director.tension > 0.2
+params:
+  participant_count: 3
+  location: village_hall
+prompt: |
+  两家为一块地的归属争执已久。今天终于闹到村公所。
+  文书与口头之约相互矛盾。
+evaluator:
+  require: [party_a, party_b, evidence]
+  max_reward: 0.35

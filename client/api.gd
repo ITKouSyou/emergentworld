@@ -89,6 +89,43 @@ signal factions_received(data: Dictionary)
 func fetch_factions() -> void:
 	_request("GET", "/faction", {}, "factions_received")
 
+signal recipes_received(data: Array)
+signal craft_done(data: Dictionary)
+
+func fetch_recipes() -> void:
+	_request("GET", "/craft/recipes", {}, "recipes_received")
+
+func craft_item(recipe_id: String) -> void:
+	_request("POST", "/craft", {"recipe_id": recipe_id}, "craft_done")
+
+signal equip_done(data: Dictionary)
+signal unequip_done(data: Dictionary)
+
+func equip_item(item_id: String) -> void:
+	_request("POST", "/equip", {"item_id": item_id}, "equip_done")
+
+func unequip_slot(slot: String) -> void:
+	_request("POST", "/unequip", {"slot": slot}, "unequip_done")
+
+signal npc_quests_received(data: Array)
+signal quest_accepted(data: Dictionary)
+
+func fetch_npc_quests(npc_id: String) -> void:
+	_request("GET", "/npc/%s/quests" % npc_id, {}, "npc_quests_received")
+
+func accept_npc_quest(npc_id: String, quest_def_id: String) -> void:
+	_request("POST", "/npc/%s/quests/accept" % npc_id,
+		{"quest_def_id": quest_def_id}, "quest_accepted")
+
+signal npc_active_quests_received(data: Array)
+signal quest_turned_in(data: Dictionary)
+
+func fetch_npc_active_quests(npc_id: String) -> void:
+	_request("GET", "/npc/%s/active_quests" % npc_id, {}, "npc_active_quests_received")
+
+func turn_in_quest(quest_id: String) -> void:
+	_request("POST", "/quest/%s/turn_in" % quest_id, {}, "quest_turned_in")
+
 func fetch_world_state() -> void: _request("GET", "/world/state", {}, "world_state_received")
 func step_world() -> void: _request("POST", "/world/step", {}, "event_triggered")
 func trigger_event() -> void: _request("POST", "/event/trigger", {}, "event_triggered")
@@ -115,8 +152,11 @@ func drop_item(item_id: String) -> void: _item_request("POST", "/item/%s/drop" %
 func give_item(item_id: String, owner_id: String) -> void:
 	_item_request("POST", "/item/%s/give" % item_id, {"owner_id": owner_id}, "give")
 
-func use_item(item_id: String, target_npc_id: String) -> void:
-	_item_request("POST", "/item/%s/use" % item_id, {"target_npc_id": target_npc_id}, "use")
+func use_item(item_id: String, target_npc_id: String, target_type: String = "auto") -> void:
+	_item_request("POST", "/item/%s/use" % item_id, {
+		"target_npc_id": target_npc_id,
+		"target_type": target_type,
+	}, "use")
 
 func resolve_event(event_id: String, choice_id: String) -> void:
 	var body := {"choice_id": choice_id}
@@ -126,7 +166,7 @@ func resolve_event(event_id: String, choice_id: String) -> void:
 
 func _item_request(method: String, path: String, body: Dictionary, action_name: String) -> void:
 	var http := HTTPRequest.new()
-	http.timeout = 60.0
+	http.timeout = 180.0
 	add_child(http)
 	http.request_completed.connect(_on_item_response.bind(http, action_name))
 	var url := BASE_URL + path
@@ -164,7 +204,7 @@ func _on_item_response(
 func _request(method: String, path: String, body: Dictionary, signal_name: String) -> void:
 	print("[api] → %s %s" % [method, path])
 	var http := HTTPRequest.new()
-	http.timeout = 60.0
+	http.timeout = 180.0
 	add_child(http)
 	http.request_completed.connect(_on_response.bind(http, signal_name))
 	var url := BASE_URL + path

@@ -80,7 +80,15 @@ def get_attribute_defs() -> dict:
 def _player_to_response(session, p) -> dict:
     """把 Player 转成带 known_locations 的响应 dict。"""
     from server.map_layout import LOCATION_LAYOUT
+    from server.systems import equipment as equip_sys
     data = p.model_dump()
+    # 装备加成后的最终属性
+    try:
+        data["total_attributes"] = equip_sys.compute_total_attributes(session, p.attributes)
+        data["equipment_slots"] = equip_sys.equipped_summary(session)
+    except Exception as e:
+        data["total_attributes"] = p.attributes
+        data["equipment_slots"] = []
 
     world = load_world(session)
     discovered = list(world.location_ids or [])
@@ -690,6 +698,7 @@ async def travel_endpoint(req: TravelRequest) -> dict:
             p_for_check = player_sys.load_player(s)
             if p_for_check is not None:
                 completed_quests = quest_sys.check_location_completion(s, world, p_for_check)
+                quest_sys.check_ready_to_turn_in(s, p_for_check)
         except Exception as e:
             import traceback
             print("[travel] 任务完成检查失败：%s" % e)
@@ -883,6 +892,8 @@ def quest_list(limit: int = 30) -> list[dict]:
                 "reward_money": q.reward_money,
                 "created_tick": q.created_tick,
                 "completed_tick": q.completed_tick,
+                "require_item_kind": getattr(q, "require_item_kind", "") or "",
+                "require_item_count": getattr(q, "require_item_count", 0),
             }
             for q in rows
         ]
@@ -910,6 +921,123 @@ def faction_status() -> dict:
             "factions": faction_sys.player_rep_summary(s),
             "market_discount": faction_sys.market_discount(s),
         }
+
+
+# ---------- Crafting ----------
+
+@app.get("/craft/recipes")
+def list_recipes() -> list[dict]:
+    with get_session() as s:
+        from server.systems import crafting as craft_sys
+        return craft_sys.list_available_recipes(s, "player")
+
+
+class CraftRequest(BaseModel):
+    recipe_id: str
+
+
+@app.post("/craft")
+def do_craft(req: CraftRequest) -> dict:
+    with get_session() as s:
+        world = load_world(s)
+        player = player_sys.load_player(s)
+        if player is None or not player.created:
+            raise HTTPException(400, "player not created")
+        from server.systems import crafting as craft_sys
+        result = craft_sys.craft(s, world, player, req.recipe_id)
+        if not result.get("ok"):
+            raise HTTPException(400, result.get("error", "craft failed"))
+        return result
+
+
+# ---------- Equipment ----------
+
+class EquipRequest(BaseModel):
+    item_id: str
+
+
+class UnequipRequest(BaseModel):
+    slot: str
+
+
+@app.post("/equip")
+def equip_endpoint(req: EquipRequest) -> dict:
+    with get_session() as s:
+        player = player_sys.load_player(s)
+        if player is None or not player.created:
+            raise HTTPException(400, "player not created")
+        from server.systems import equipment as equip_sys
+        result = equip_sys.equip(s, player, req.item_id)
+        if not result.get("ok"):
+            raise HTTPException(400, result.get("error", "equip failed"))
+        return result
+
+
+@app.post("/unequip")
+def unequip_endpoint(req: UnequipRequest) -> dict:
+    with get_session() as s:
+        player = player_sys.load_player(s)
+        if player is None or not player.created:
+            raise HTTPException(400, "player not created")
+        from server.systems import equipment as equip_sys
+        result = equip_sys.unequip(s, player, req.slot)
+        if not result.get("ok"):
+            raise HTTPException(400, result.get("error", "unequip failed"))
+        return result
+
+
+@app.get("/equipment")
+def get_equipment() -> dict:
+    with get_session() as s:
+        from server.systems import equipment as equip_sys
+        return {"slots": equip_sys.equipped_summary(s)}
+
+
+@app.get("/npc/{npc_id}/quests")
+def npc_offerable_quests(npc_id: str) -> list[dict]:
+    with get_session() as s:
+        from server.systems import quest as quest_sys
+        items = quest_sys.get_offerable_quests(s, npc_id)
+        # 补 location_label
+        for it in items:
+            it["require_location_label"] = i18n.location_label(it["require_location"])
+        return items
+
+
+class AcceptQuestRequest(BaseModel):
+    quest_def_id: str
+
+
+@app.post("/npc/{npc_id}/quests/accept")
+def accept_quest_endpoint(npc_id: str, req: AcceptQuestRequest) -> dict:
+    with get_session() as s:
+        world = load_world(s)
+        from server.systems import quest as quest_sys
+        result = quest_sys.accept_quest(s, world, npc_id, req.quest_def_id)
+        if not result.get("ok"):
+            raise HTTPException(400, result.get("error", "accept failed"))
+        return result
+
+
+@app.post("/quest/{quest_id}/turn_in")
+def quest_turn_in(quest_id: str) -> dict:
+    with get_session() as s:
+        world = load_world(s)
+        from server.systems import quest as quest_sys
+        result = quest_sys.turn_in_quest(s, world, quest_id)
+        if not result.get("ok"):
+            raise HTTPException(400, result.get("error", "turn in failed"))
+        # 返回更新后的 player
+        p2 = player_sys.load_player(s)
+        result["player"] = _player_to_response(s, p2) if p2 else {}
+        return result
+
+
+@app.get("/npc/{npc_id}/active_quests")
+def npc_active_quests(npc_id: str) -> list[dict]:
+    with get_session() as s:
+        from server.systems import quest as quest_sys
+        return quest_sys.list_npc_active_quests(s, npc_id)
 
 
 @app.get("/event")
@@ -1070,6 +1198,7 @@ class GiveRequest(BaseModel):
 
 class UseRequest(BaseModel):
     target_npc_id: str = ""
+    target_type: str = "auto"
 
 
 def _row_to_item(r: ItemRow, npc_names: dict[str, str]) -> dict:
@@ -1089,6 +1218,8 @@ def _row_to_item(r: ItemRow, npc_names: dict[str, str]) -> dict:
         "story": r.story, "value": r.value,
         "owner_id": owner_id, "owner_label": owner_label,
         "consumed": r.consumed,
+        "category": getattr(r, "category", "material") or "material",
+        "slot": getattr(r, "slot", "") or "",
     }
 
 
@@ -1150,7 +1281,9 @@ async def use_item_endpoint(item_id: str, req: UseRequest) -> dict:
         world = load_world(s)
         result = await item_use.use_item(
             s, world, item_id=item_id,
-            user_id="player", target_npc_id=req.target_npc_id,
+            user_id="player",
+            target_npc_id=req.target_npc_id,
+            target_type=req.target_type,
         )
         if not result.get("ok"):
             raise HTTPException(400, result.get("error", "use failed"))

@@ -1,0 +1,16 @@
+id: family_dinner
+tags: [social, daily, ritual]
+cooldown: 12
+weight: 1.0
+interactive: false
+conditions:
+  - director.tension < 0.6
+params:
+  participant_count: 3
+  location: home
+prompt: |
+  一家人围坐吃饭。饭桌上有说有笑，也暗藏心结。
+  席间有人提到一件不宜提起的旧事。
+evaluator:
+  require: [family, meal_scene, suppressed_topic]
+  max_reward: 0.15

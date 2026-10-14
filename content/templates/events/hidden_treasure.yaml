@@ -1,0 +1,16 @@
+id: hidden_treasure
+tags: [adventure, mystery, plot]
+cooldown: 20
+weight: 0.9
+interactive: true
+conditions:
+  - director.tension < 0.6
+params:
+  participant_count: 3
+  location: old_shrine
+prompt: |
+  有人在古庙遗址发现一块刻字的石砖。
+  文字提到的位置，似乎在村的某处。
+evaluator:
+  require: [finder, clue_text, location_hint]
+  max_reward: 0.4

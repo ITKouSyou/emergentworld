@@ -44,6 +44,7 @@ class PlayerRow(SQLModel, table=True):
     background: str = ""
     known_npcs_json: str = "[]"
     factions_json: str = "{}"
+    equipment_json: str = "{}"
     created: bool = False
 
 
@@ -126,6 +127,12 @@ class ItemRow(SQLModel, table=True):
     value: float = 0.0
     owner_id: str = Field(default="", index=True)
     consumed: bool = False
+    durability: int = 100
+    max_durability: int = 100
+    category: str = "material"
+    use_effect_json: str = "{}"
+    slot: str = ""
+    attributes_json: str = "{}"
 
 
 class ItemUseRow(SQLModel, table=True):
@@ -184,6 +191,8 @@ class QuestRow(SQLModel, table=True):
     created_tick: int = 0
     deadline_tick: int = 0
     completed_tick: int = 0
+    require_item_kind: str = ""
+    require_item_count: int = 0
 
 
 class EvaluationRow(SQLModel, table=True):

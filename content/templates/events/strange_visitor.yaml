@@ -1,0 +1,16 @@
+id: strange_visitor
+tags: [mystery, plot]
+cooldown: 18
+weight: 0.9
+interactive: false
+conditions:
+  - director.tension > 0.2
+params:
+  participant_count: 2
+  location: tavern
+prompt: |
+  一位陌生客人住进酒馆，话少钱多。
+  有人注意到他袖口有血迹。
+evaluator:
+  require: [visitor, clue, suspicion]
+  max_reward: 0.25

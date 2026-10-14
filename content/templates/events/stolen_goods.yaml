@@ -1,0 +1,16 @@
+id: stolen_goods
+tags: [trade, mystery, plot]
+cooldown: 12
+weight: 1.0
+interactive: true
+conditions:
+  - director.tension < 0.8
+params:
+  participant_count: 2
+  location: tavern
+prompt: |
+  有人在酒馆悄悄兜售一批来历不明的货物。
+  价格低得可疑。买主开始犹豫。
+evaluator:
+  require: [seller, goods, hint_origin]
+  max_reward: 0.25

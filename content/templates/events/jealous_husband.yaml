@@ -1,0 +1,16 @@
+id: jealous_husband
+tags: [romance, conflict, plot]
+cooldown: 10
+weight: 1.0
+interactive: true
+conditions:
+  - director.tension > 0.3
+params:
+  participant_count: 3
+  location: tavern
+prompt: |
+  一位丈夫当众质问妻子与某人的关系。
+  妻子坚称清白，被牵连的第三人一语不发。
+evaluator:
+  require: [husband, wife, third_party]
+  max_reward: 0.3

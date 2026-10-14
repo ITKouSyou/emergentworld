@@ -1,0 +1,16 @@
+id: business_partnership
+tags: [trade, social, plot]
+cooldown: 10
+weight: 1.0
+interactive: true
+conditions:
+  - director.tension < 0.7
+params:
+  participant_count: 2
+  location: market
+prompt: |
+  两个商贩商量合伙做一笔生意。出钱出力的比例争执不下。
+  生意机会转瞬即逝，两人必须尽快定夺。
+evaluator:
+  require: [partner_a, partner_b, deal]
+  max_reward: 0.3

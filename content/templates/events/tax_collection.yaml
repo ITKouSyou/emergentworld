@@ -1,0 +1,16 @@
+id: tax_collection
+tags: [political, trade, conflict]
+cooldown: 20
+weight: 0.9
+interactive: true
+conditions:
+  - director.tension > 0.3
+params:
+  participant_count: 3
+  location: market
+prompt: |
+  收税人来到市场。摊贩们脸色各异。
+  有人乖乖交，有人讨价还价，有人干脆收摊。
+evaluator:
+  require: [collector, taxpayers, resistance]
+  max_reward: 0.3

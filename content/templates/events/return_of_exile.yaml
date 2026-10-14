@@ -1,0 +1,16 @@
+id: return_of_exile
+tags: [plot, mystery, social]
+cooldown: 20
+weight: 0.9
+interactive: true
+conditions:
+  - director.tension > 0.3
+params:
+  participant_count: 3
+  location: village_square
+prompt: |
+  一位多年未归的村民回到村里。
+  有人欢迎，有人冷脸，还有人眼神躲闪。
+evaluator:
+  require: [returnee, welcomer, doubtful]
+  max_reward: 0.35

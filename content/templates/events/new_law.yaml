@@ -1,0 +1,16 @@
+id: new_law
+tags: [political, plot, social]
+cooldown: 25
+weight: 0.8
+interactive: true
+conditions:
+  - director.tension > 0.3
+params:
+  participant_count: 4
+  location: village_hall
+prompt: |
+  村公所颁布了一条新规。
+  一部分人受益，一部分人受损。当众有人抗议。
+evaluator:
+  require: [law_content, supporters, protestors]
+  max_reward: 0.35

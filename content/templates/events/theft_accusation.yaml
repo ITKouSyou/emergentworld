@@ -1,0 +1,16 @@
+id: theft_accusation
+tags: [conflict, investigation, plot]
+cooldown: 10
+weight: 1.1
+interactive: true
+conditions:
+  - director.tension > 0.3
+params:
+  participant_count: 3
+  location: market
+prompt: |
+  有人当众指控另一人偷窃。被指的人脸色大变。
+  围观者议论纷纷。真相扑朔迷离。
+evaluator:
+  require: [accuser, accused, item]
+  max_reward: 0.3

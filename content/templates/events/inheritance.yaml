@@ -1,0 +1,16 @@
+id: inheritance
+tags: [plot, conflict, ritual]
+cooldown: 20
+weight: 0.9
+interactive: true
+conditions:
+  - director.tension > 0.3
+params:
+  participant_count: 3
+  location: village_hall
+prompt: |
+  一位老人过世，留下遗产。几位晚辈各执一词。
+  有人拿出文书，有人声称口头承诺。
+evaluator:
+  require: [heirs, document, claim]
+  max_reward: 0.4

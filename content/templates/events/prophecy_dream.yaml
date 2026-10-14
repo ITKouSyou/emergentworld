@@ -1,0 +1,16 @@
+id: prophecy_dream
+tags: [mystery, ritual, plot]
+cooldown: 20
+weight: 0.8
+interactive: false
+conditions:
+  - director.tension > 0.4
+params:
+  participant_count: 2
+  location: home
+prompt: |
+  一位村民梦见了村子的未来。梦里有一个清楚的景象。
+  醒来后他四处告诉人，有人信，有人笑。
+evaluator:
+  require: [dreamer, dream_image, believers]
+  max_reward: 0.2

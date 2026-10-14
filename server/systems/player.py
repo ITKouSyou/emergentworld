@@ -47,6 +47,7 @@ def load_player(session: Session) -> Optional[Player]:
         background=row.background or "",
         known_npcs=loads(row.known_npcs_json) or [],
         factions=loads(row.factions_json) or {},
+        equipment=loads(row.equipment_json) or {},
         created=row.created,
     )
 

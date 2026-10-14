@@ -1,0 +1,16 @@
+id: old_friends_reunion
+tags: [social, romance]
+cooldown: 10
+weight: 1.0
+interactive: true
+conditions:
+  - director.tension < 0.5
+params:
+  participant_count: 2
+  location: tavern
+prompt: |
+  两位多年未见的老友在酒馆重逢。其中一人已变了模样。
+  重逢勾起旧事，也牵出未了的歉疚。
+evaluator:
+  require: [friend_a, friend_b, past_event]
+  max_reward: 0.2

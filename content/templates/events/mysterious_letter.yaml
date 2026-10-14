@@ -1,0 +1,16 @@
+id: mysterious_letter
+tags: [mystery, plot, investigation]
+cooldown: 12
+weight: 1.1
+interactive: true
+conditions:
+  - director.tension < 0.6
+params:
+  participant_count: 2
+  location: home
+prompt: |
+  一封没有署名的信被塞进某户人家门缝。
+  信里提到的事情非常具体，像是熟人写的。
+evaluator:
+  require: [receiver, letter_hint, probable_sender]
+  max_reward: 0.25

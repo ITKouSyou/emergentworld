@@ -1,0 +1,16 @@
+id: cursed_item
+tags: [mystery, survival, plot]
+cooldown: 22
+weight: 0.8
+interactive: true
+conditions:
+  - director.tension > 0.3
+params:
+  participant_count: 2
+  location: home
+prompt: |
+  一件物品在村中辗转流传，凡持有者皆遭厄运。
+  最近它落到了一位村民手中。
+evaluator:
+  require: [item, victims, current_owner]
+  max_reward: 0.35

@@ -1,0 +1,16 @@
+id: fire_outbreak
+tags: [survival, conflict, plot]
+cooldown: 25
+weight: 0.8
+interactive: true
+conditions:
+  - director.tension > 0.5
+params:
+  participant_count: 4
+  location: home
+prompt: |
+  一处民宅突然起火。火势很快蔓延。
+  众人提水扑救，也有人趁乱做了什么。
+evaluator:
+  require: [fire_site, cause, hero]
+  max_reward: 0.5

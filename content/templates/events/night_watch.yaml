@@ -1,0 +1,16 @@
+id: night_watch
+tags: [survival, daily, plot]
+cooldown: 15
+weight: 0.9
+interactive: false
+conditions:
+  - director.tension > 0.3
+params:
+  participant_count: 2
+  location: village_edge
+prompt: |
+  村口有人守夜。长夜里两人断断续续地聊。
+  话题从家常一直聊到了村里的旧事。
+evaluator:
+  require: [watchers, hour, topic]
+  max_reward: 0.15

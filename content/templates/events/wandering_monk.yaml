@@ -1,0 +1,16 @@
+id: wandering_monk
+tags: [ritual, mystery, social]
+cooldown: 20
+weight: 0.9
+interactive: true
+conditions:
+  - director.tension < 0.6
+params:
+  participant_count: 2
+  location: village_square
+prompt: |
+  一位游方僧人来到村庄。他说化缘，也说法。
+  有人想听，有人想赶他走。
+evaluator:
+  require: [monk, sermon_topic, reactions]
+  max_reward: 0.3

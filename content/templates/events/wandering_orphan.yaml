@@ -1,0 +1,16 @@
+id: wandering_orphan
+tags: [plot, social, mystery]
+cooldown: 15
+weight: 1.0
+interactive: true
+conditions:
+  - director.tension < 0.6
+params:
+  participant_count: 2
+  location: village_square
+prompt: |
+  一个衣衫褴褛的孩子在村口张望。
+  说是来找人的，但说不出名字。村里有人觉得眼熟。
+evaluator:
+  require: [orphan, resemblance, claim]
+  max_reward: 0.3

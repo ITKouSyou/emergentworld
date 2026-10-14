@@ -37,6 +37,8 @@ var reward_log: RichTextLabel
 var market_log: RichTextLabel
 var quest_log: RichTextLabel
 var faction_log: RichTextLabel
+var craft_log: RichTextLabel
+var all_recipes: Array = []
 var goal_log: RichTextLabel
 var market_buy_row: HBoxContainer
 var item_list: ItemList
@@ -70,6 +72,10 @@ var pending_events_by_id: Dictionary = {}
 var items: Array = []
 var item_order: Array[String] = []
 var current_item_id: String = ""
+var npc_quests_panel: VBoxContainer
+var npc_quests_data: Array = []
+var equip_btn: Button
+var equip_slot_labels: Dictionary = {}
 var player_data: Dictionary = {}
 var player_created: bool = false
 
@@ -147,6 +153,14 @@ func _connect_signals() -> void:
 	api.factions_received.connect(_on_factions_received)
 	api.quest_abandoned.connect(_on_quest_abandoned)
 	api.request_failed.connect(_on_request_failed)
+	api.recipes_received.connect(_on_recipes_received)
+	api.craft_done.connect(_on_craft_done)
+	api.equip_done.connect(_on_equip_done)
+	api.unequip_done.connect(_on_unequip_done)
+	api.npc_quests_received.connect(_on_npc_quests_received)
+	api.quest_accepted.connect(_on_quest_accepted)
+	api.npc_active_quests_received.connect(_on_npc_active_quests_received)
+	api.quest_turned_in.connect(_on_quest_turned_in)
 
 func _safe_str(v) -> String:
 	if v == null:
@@ -157,6 +171,12 @@ func _safe_str(v) -> String:
 # ================================================================
 # UI 构建
 # ================================================================
+
+func _make_small_tab_theme() -> Theme:
+	var theme := Theme.new()
+	theme.set_font_size("font_size", "TabBar", 12)
+	return theme
+
 
 func _build_ui() -> void:
 	set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -197,14 +217,18 @@ func _build_ui() -> void:
 	var mid_tabs := TabContainer.new()
 	mid_tabs.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	mid_tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	mid_tabs.add_theme_font_size_override("font_size", 12)
+	mid_tabs.add_theme_stylebox_override("tab_selected", StyleBoxEmpty.new())
 	split.add_child(mid_tabs)
 	_build_map_tab(mid_tabs)
 	_build_npc_tab(mid_tabs)
 
 	# --- 右栏：事件 / 史册 / 奖励 / 物品 ---
 	var right_tabs := TabContainer.new()
-	right_tabs.custom_minimum_size = Vector2(420, 0)
+	right_tabs.custom_minimum_size = Vector2(440, 0)
+	right_tabs.size_flags_horizontal = Control.SIZE_SHRINK_END
 	right_tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	right_tabs.add_theme_font_size_override("font_size", 11)
 	split.add_child(right_tabs)
 	_build_event_tab(right_tabs)
 	_build_quest_tab(right_tabs)
@@ -213,6 +237,7 @@ func _build_ui() -> void:
 	_build_market_tab(right_tabs)
 	_build_reward_tab(right_tabs)
 	_build_item_tab(right_tabs)
+	_build_craft_tab(right_tabs)
 	_ensure_explore_ui()
 
 
@@ -223,6 +248,7 @@ func _build_top_bar(root: VBoxContainer) -> void:
 
 	status_label = RichTextLabel.new()
 	status_label.bbcode_enabled = true
+	status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	status_label.fit_content = false
 	status_label.scroll_active = false
 	status_label.text = "加载中..."
@@ -284,9 +310,40 @@ func _build_player_tab(parent: Container) -> void:
 
 	player_stats_label = RichTextLabel.new()
 	player_stats_label.bbcode_enabled = true
+	player_stats_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	player_stats_label.fit_content = true
 	player_stats_label.custom_minimum_size = Vector2(0, 120)
 	player_tab_panel.add_child(player_stats_label)
+
+	var equip_title := Label.new()
+	equip_title.text = "[装备槽]"
+	equip_title.add_theme_font_size_override("font_size", 14)
+	player_tab_panel.add_child(equip_title)
+
+	# 三个槽位显示
+	for slot_key in ["weapon", "armor", "accessory", "tool"]:
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 6)
+
+		var slot_lbl := Label.new()
+		slot_lbl.custom_minimum_size = Vector2(60, 0)
+		slot_lbl.text = {"weapon": "武器", "armor": "护甲", "accessory": "饰物", "tool": "工具"}.get(slot_key, slot_key)
+		row.add_child(slot_lbl)
+
+		var val_lbl := Label.new()
+		val_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		val_lbl.text = "（空）"
+		row.add_child(val_lbl)
+
+		var un_btn := Button.new()
+		un_btn.text = "卸下"
+		un_btn.disabled = true
+		var sk: String = str(slot_key)
+		un_btn.pressed.connect(func(): _on_unequip_pressed(sk))
+		row.add_child(un_btn)
+
+		player_tab_panel.add_child(row)
+		equip_slot_labels[slot_key] = {"label": val_lbl, "btn": un_btn}
 
 	var attr_title := Label.new()
 	attr_title.text = "属性（可分配点 [+] 可加到 20，行动自然成长上限 15）"
@@ -403,16 +460,44 @@ func _render_player_panel() -> void:
 	lines.append("[b]所在地：[/b]%s" % loc_label)
 	player_stats_label.text = "\n".join(lines)
 
-	var attrs: Dictionary = player_data.get("attributes", {})
-	var attr_labels := {
-		"strength": "力量", "agility": "敏捷", "intelligence": "智慧",
-		"perception": "感知", "charisma": "魅力", "luck": "运气",
-	}
+	# 属性显示用"基础 + 装备加成"
+	var base_attrs: Dictionary = player_data.get("attributes", {})
+	var total_attrs: Dictionary = player_data.get("total_attributes", base_attrs)
 	for key in player_attr_rows.keys():
 		var r: Dictionary = player_attr_rows[key]
-		var v: int = int(attrs.get(key, 5))
-		(r["label"] as Label).text = str(v)
+		var v: int = int(base_attrs.get(key, 5))
+		var tv: int = int(total_attrs.get(key, v))
+		if tv != v:
+			(r["label"] as Label).text = "%d [color=gold](%d)[/color]" % [v, tv]
+		else:
+			(r["label"] as Label).text = str(v)
 		(r["btn"] as Button).disabled = unspent <= 0 or v >= 20
+
+	# 装备槽
+	var eq_slots: Array = player_data.get("equipment_slots", [])
+	for slot_data in eq_slots:
+		if not slot_data is Dictionary:
+			continue
+		var sk: String = str(slot_data.get("slot", ""))
+		if not equip_slot_labels.has(sk):
+			continue
+		var rec: Dictionary = equip_slot_labels[sk]
+		var nm: String = str(slot_data.get("item_name", "（空）"))
+		var item_id: String = str(slot_data.get("item_id", ""))
+		if nm == "" or nm == "（空）":
+			(rec["label"] as Label).text = "（空）"
+			(rec["btn"] as Button).disabled = true
+		else:
+			var attrs_dict: Dictionary = slot_data.get("attributes", {})
+			var attr_strs: Array[String] = []
+			for k in attrs_dict.keys():
+				var k_zh: String = {
+					"strength": "力量", "agility": "敏捷", "intelligence": "智慧",
+					"perception": "感知", "charisma": "魅力", "luck": "运气",
+				}.get(str(k), str(k))
+				attr_strs.append("%s+%d" % [k_zh, int(attrs_dict[k])])
+			(rec["label"] as Label).text = "%s  %s" % [nm, " ".join(attr_strs)]
+			(rec["btn"] as Button).disabled = false
 	_refresh_travel_options()
 
 
@@ -468,6 +553,7 @@ func _build_npc_tab(parent: TabContainer) -> void:
 
 	npc_detail = RichTextLabel.new()
 	npc_detail.bbcode_enabled = true
+	npc_detail.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	npc_detail.fit_content = true
 	npc_detail.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	npc_detail.text = "从左侧选择一位居民"
@@ -475,15 +561,23 @@ func _build_npc_tab(parent: TabContainer) -> void:
 
 	npc_items_label = RichTextLabel.new()
 	npc_items_label.bbcode_enabled = true
+	npc_items_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	npc_items_label.fit_content = true
 	npc_items_label.custom_minimum_size = Vector2(0, 60)
 	right.add_child(npc_items_label)
 
 	relationship_label = RichTextLabel.new()
 	relationship_label.bbcode_enabled = true
+	relationship_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	relationship_label.fit_content = true
 	relationship_label.custom_minimum_size = Vector2(0, 60)
 	right.add_child(relationship_label)
+
+	# NPC 委托任务面板
+	npc_quests_panel = VBoxContainer.new()
+	npc_quests_panel.add_theme_constant_override("separation", 4)
+	npc_quests_panel.name = "QuestOfferPanel"
+	right.add_child(npc_quests_panel)
 
 	var dlg_title := Label.new()
 	dlg_title.text = "对话"
@@ -496,6 +590,7 @@ func _build_npc_tab(parent: TabContainer) -> void:
 
 	dialogue_log = RichTextLabel.new()
 	dialogue_log.bbcode_enabled = true
+	dialogue_log.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	dialogue_log.fit_content = true
 	dialogue_log.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	dlg_scroll.add_child(dialogue_log)
@@ -528,6 +623,7 @@ func _build_event_tab(parent: TabContainer) -> void:
 
 	event_log = RichTextLabel.new()
 	event_log.bbcode_enabled = true
+	event_log.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	event_log.fit_content = true
 	event_log.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	event_log.meta_clicked.connect(_on_event_meta_clicked)
@@ -570,6 +666,7 @@ func _build_chronicle_tab(parent: TabContainer) -> void:
 
 	chronicle_log = RichTextLabel.new()
 	chronicle_log.bbcode_enabled = true
+	chronicle_log.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	chronicle_log.fit_content = true
 	chronicle_log.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	chr_scroll.add_child(chronicle_log)
@@ -595,6 +692,7 @@ func _build_reward_tab(parent: TabContainer) -> void:
 	parent.add_child(rwd_scroll)
 	reward_log = RichTextLabel.new()
 	reward_log.bbcode_enabled = true
+	reward_log.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	reward_log.fit_content = true
 	reward_log.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	rwd_scroll.add_child(reward_log)
@@ -618,6 +716,7 @@ func _build_item_tab(parent: TabContainer) -> void:
 
 	item_detail = RichTextLabel.new()
 	item_detail.bbcode_enabled = true
+	item_detail.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	item_detail.fit_content = true
 	item_detail.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	item_detail.text = "选中一件物品查看详情"
@@ -631,6 +730,11 @@ func _build_item_tab(parent: TabContainer) -> void:
 	use_btn.text = "使用"
 	use_btn.pressed.connect(_on_use_pressed)
 	item_buttons.add_child(use_btn)
+
+	equip_btn = Button.new()
+	equip_btn.text = "装备"
+	equip_btn.pressed.connect(_on_equip_pressed)
+	item_buttons.add_child(equip_btn)
 
 	give_btn = Button.new()
 	give_btn.text = "给予"
@@ -905,6 +1009,7 @@ func _refresh_all() -> void:
 	api.fetch_goals()
 	api.fetch_quests()
 	api.fetch_factions()
+	api.fetch_recipes()
 
 func _on_i18n_received(data: Dictionary) -> void:
 	i18n_traits = data.get("traits", {})
@@ -978,6 +1083,7 @@ func _on_npc_selected(index: int) -> void:
 	api.fetch_npc_detail(current_npc_id)
 	api.fetch_relationships(current_npc_id)
 	api.fetch_npc_items(current_npc_id)
+	api.fetch_npc_quests(current_npc_id)
 	if map_view:
 		map_view.set_selected(current_npc_id)
 	var name: String = str(npc_data[current_npc_id].get("name", "?"))
@@ -1514,6 +1620,30 @@ func _render_item_detail(item_id: String) -> void:
 		if story != "":
 			lines.append("[color=lightgray]%s[/color]" % story)
 		lines.append("价值：%.2f" % value)
+
+		# 耐久（只对装备显示）
+		var cat: String = str(it.get("category", "material"))
+		if cat == "equipment":
+			var dur: int = int(it.get("durability", 100))
+			var max_dur: int = int(it.get("max_durability", 100))
+			if max_dur > 0:
+				var dcolor := "lightgreen"
+				if dur <= max_dur * 0.3:
+					dcolor = "red"
+				elif dur <= max_dur * 0.6:
+					dcolor = "yellow"
+				lines.append("耐久：[color=%s]%d / %d[/color]" % [dcolor, dur, max_dur])
+
+		# 类别标签
+		var cat_label: String = {
+			"consumable": "消耗品",
+			"equipment": "装备",
+			"material": "材料",
+			"key": "钥匙",
+			"quest": "剧情物品",
+		}.get(cat, "材料")
+		lines.append("类别：[color=cyan]%s[/color]" % cat_label)
+
 		item_detail.text = "\n".join(lines)
 
 		var owner_id: String = str(it.get("owner_id", ""))
@@ -1523,6 +1653,11 @@ func _render_item_detail(item_id: String) -> void:
 		give_btn.disabled = not is_player
 		drop_btn.disabled = not is_player
 		take_btn.disabled = not is_npc
+
+		# 装备按钮：仅装备类可用
+		var cat_eq: String = str(it.get("category", "material"))
+		if equip_btn != null:
+			equip_btn.disabled = not (is_player and cat_eq == "equipment")
 		return
 
 
@@ -1558,9 +1693,93 @@ func _on_give_pressed() -> void:
 func _on_use_pressed() -> void:
 	if current_item_id == "":
 		return
-	_show_target_picker("对谁使用？（可无目标）", func(target_id: String):
+	# 检查类别
+	var cat: String = ""
+	for it in items:
+		if str(it.get("id", "")) == current_item_id:
+			cat = str(it.get("category", "material"))
+			break
+
+	if cat == "material" or cat == "quest":
+		# 直接提示不能使用
+		item_detail.append_text("\n\n[color=gray]（这是材料/剧情物品，不能直接使用）[/color]")
+		return
+
+	if cat == "equipment":
+		# 装备走装备流程（下一轮完整实现）
+		# 装备走 /equip 端点
+		api.equip_item(current_item_id)
+		return
+
+	if cat == "consumable":
+		# 消耗品：可以对自己、对NPC、无目标
+		_show_use_consumable_dialog()
+		return
+
+	if cat == "key":
+		# 钥匙：对场景使用
+		api.use_item(current_item_id, "", "scene")
+		return
+
+	# 兜底
+	_show_target_picker("对谁使用？", func(target_id: String):
 		api.use_item(current_item_id, target_id)
 	)
+
+
+func _show_use_consumable_dialog() -> void:
+	var popup := PopupPanel.new()
+	add_child(popup)
+
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 8)
+	vbox.custom_minimum_size = Vector2(320, 0)
+	popup.add_child(vbox)
+
+	var label := Label.new()
+	label.text = "怎么使用？"
+	vbox.add_child(label)
+
+	# 自己
+	var self_btn := Button.new()
+	self_btn.text = "对自己使用"
+	self_btn.pressed.connect(func():
+		api.use_item(current_item_id, "", "self")
+		popup.queue_free()
+	)
+	vbox.add_child(self_btn)
+
+	# NPC
+	var npc_row := HBoxContainer.new()
+	npc_row.add_theme_constant_override("separation", 6)
+	vbox.add_child(npc_row)
+
+	var option := OptionButton.new()
+	option.add_item("（选择 NPC）")
+	for npc_id in npc_order:
+		option.add_item(str(npc_data[npc_id].get("name", "?")))
+	option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	npc_row.add_child(option)
+
+	var npc_btn := Button.new()
+	npc_btn.text = "对 NPC 使用"
+	npc_btn.pressed.connect(func():
+		var sel := option.selected
+		if sel <= 0:
+			return
+		var target_id := npc_order[sel - 1]
+		api.use_item(current_item_id, target_id, "npc")
+		popup.queue_free()
+	)
+	npc_row.add_child(npc_btn)
+
+	# 取消
+	var cancel := Button.new()
+	cancel.text = "取消"
+	cancel.pressed.connect(func(): popup.queue_free())
+	vbox.add_child(cancel)
+
+	popup.popup_centered(Vector2i(340, 220))
 
 
 func _show_target_picker(title: String, on_confirm: Callable) -> void:
@@ -1775,6 +1994,7 @@ func _ensure_explore_ui() -> void:
 	# 结果框
 	explore_result_label = RichTextLabel.new()
 	explore_result_label.bbcode_enabled = true
+	explore_result_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	explore_result_label.fit_content = true
 	explore_result_label.custom_minimum_size = Vector2(0, 90)
 	player_tab_panel.add_child(explore_result_label)
@@ -1810,6 +2030,7 @@ func _ensure_action_ui() -> void:
 
 	action_result_label = RichTextLabel.new()
 	action_result_label.bbcode_enabled = true
+	action_result_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	action_result_label.fit_content = true
 	action_result_label.custom_minimum_size = Vector2(0, 100)
 
@@ -1981,6 +2202,7 @@ func _build_travel_row() -> void:
 
 	travel_result_label = RichTextLabel.new()
 	travel_result_label.bbcode_enabled = true
+	travel_result_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	travel_result_label.fit_content = true
 	travel_result_label.custom_minimum_size = Vector2(0, 40)
 	player_tab_panel.add_child(travel_result_label)
@@ -2112,6 +2334,7 @@ func _build_market_tab(parent: TabContainer) -> void:
 
 	market_log = RichTextLabel.new()
 	market_log.bbcode_enabled = true
+	market_log.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	market_log.fit_content = true
 	market_log.meta_clicked.connect(_on_market_meta_clicked)
 	market_log.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -2216,6 +2439,7 @@ func _build_goal_section() -> void:
 
 	goal_log = RichTextLabel.new()
 	goal_log.bbcode_enabled = true
+	goal_log.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	goal_log.fit_content = true
 	goal_log.meta_clicked.connect(_on_goal_meta_clicked)
 	goal_log.custom_minimum_size = Vector2(0, 120)
@@ -2308,6 +2532,7 @@ func _build_quest_tab(parent: TabContainer) -> void:
 
 	quest_log = RichTextLabel.new()
 	quest_log.bbcode_enabled = true
+	quest_log.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	quest_log.fit_content = true
 	quest_log.meta_clicked.connect(_on_quest_meta_clicked)
 	quest_log.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -2363,6 +2588,11 @@ func _render_quest_entry(q: Dictionary, active: bool) -> void:
 			quest_log.append_text("    [color=lightgray]委托人：%s[/color]\n" % giver)
 		if loc_label != "":
 			quest_log.append_text("    [color=cyan]目标地点：%s[/color]\n" % loc_label)
+
+		var rk: String = str(q.get("require_item_kind", ""))
+		var rc: int = int(q.get("require_item_count", 0))
+		if rk != "" and rc > 0:
+			quest_log.append_text("    [color=yellow]需要：%s×%d[/color]\n" % [rk, rc])
 
 		var rewards: Array[String] = []
 		if exp_r > 0:
@@ -2446,6 +2676,7 @@ func _build_faction_tab(parent: TabContainer) -> void:
 
 	faction_log = RichTextLabel.new()
 	faction_log.bbcode_enabled = true
+	faction_log.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	faction_log.fit_content = true
 	faction_log.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.add_child(faction_log)
@@ -2490,3 +2721,271 @@ func _on_factions_received(data: Dictionary) -> void:
 		faction_log.append_text("    商帮态度冷淡，价格上浮 [color=red]%.0f%%[/color]\n" % ((discount - 1.0) * 100))
 	else:
 		faction_log.append_text("    无折扣\n")
+
+
+func _build_craft_tab(parent: TabContainer) -> void:
+	var tab := VBoxContainer.new()
+	tab.name = "合成"
+	tab.add_theme_constant_override("separation", 6)
+	parent.add_child(tab)
+
+	var ctrl := HBoxContainer.new()
+	ctrl.add_theme_constant_override("separation", 6)
+	tab.add_child(ctrl)
+
+	var refresh := Button.new()
+	refresh.text = "刷新配方"
+	refresh.pressed.connect(func(): api.fetch_recipes())
+	ctrl.add_child(refresh)
+
+	var hint := Label.new()
+	hint.text = "（合成会消耗材料）"
+	hint.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
+	ctrl.add_child(hint)
+
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	tab.add_child(scroll)
+
+	craft_log = RichTextLabel.new()
+	craft_log.bbcode_enabled = true
+	craft_log.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	craft_log.fit_content = true
+	craft_log.meta_clicked.connect(_on_craft_meta_clicked)
+	craft_log.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(craft_log)
+
+
+func _on_recipes_received(data: Array) -> void:
+	all_recipes = data
+	if craft_log == null:
+		return
+	craft_log.clear()
+
+	if data.is_empty():
+		craft_log.text = "[i]没有可用配方[/i]"
+		return
+
+	for r in data:
+		if not r is Dictionary:
+			continue
+		var rid: String = str(r.get("id", ""))
+		var name: String = str(r.get("name", "?"))
+		var kind: String = str(r.get("kind", ""))
+		var desc: String = str(r.get("desc", ""))
+		var can_craft: bool = bool(r.get("can_craft", false))
+
+		var color := "white"
+		var prefix := "○"
+		if can_craft:
+			color = "gold"
+			prefix = "★"
+
+		craft_log.append_text("[color=%s]%s [b]%s[/b][/color]  [i](%s)[/i]\n" % [
+			color, prefix, name, kind,
+		])
+		craft_log.append_text("    %s\n" % desc)
+
+		var mats: Array = r.get("materials", [])
+		var mat_lines: Array[String] = []
+		for m in mats:
+			if not m is Dictionary:
+				continue
+			var mk: String = str(m.get("kind", ""))
+			var need: int = int(m.get("count", 0))
+			var have: int = int(m.get("have", 0))
+			var ok2 := have >= need
+			var mc := "lightgreen" if ok2 else "red"
+			mat_lines.append("[color=%s]%s %d/%d[/color]" % [mc, mk, have, need])
+		craft_log.append_text("    材料：%s\n" % "、".join(mat_lines))
+
+		if can_craft:
+			craft_log.append_text("    [url=craft:%s][color=green][合成][/color][/url]\n" % rid)
+		else:
+			craft_log.append_text("    [color=gray]（材料不足）[/color]\n")
+
+		craft_log.append_text("\n")
+
+
+func _on_craft_meta_clicked(meta) -> void:
+	var s := str(meta)
+	if s.begins_with("craft:"):
+		var rid := s.substr(6)
+		api.craft_item(rid)
+
+
+func _on_craft_done(data: Dictionary) -> void:
+	api.fetch_items(200)
+	api.fetch_recipes()
+
+
+func _on_unequip_pressed(slot: String) -> void:
+	api.unequip_slot(slot)
+
+func _on_equip_done(data: Dictionary) -> void:
+	api.fetch_player()
+	api.fetch_items(200)
+	status_label.text = "[color=gold]装备：%s（%s）[/color]" % [
+		str(data.get("item_name", "")),
+		str(data.get("slot_label", "")),
+	]
+
+func _on_unequip_done(data: Dictionary) -> void:
+	api.fetch_player()
+	api.fetch_items(200)
+	status_label.text = "[color=gray]已卸下 %s[/color]" % str(data.get("slot", ""))
+
+func _on_equip_pressed() -> void:
+	if current_item_id == "":
+		return
+	api.equip_item(current_item_id)
+
+
+
+var _npc_offer_quests: Array = []
+var _npc_active_quests: Array = []
+
+
+func _on_npc_quests_received(data: Array) -> void:
+	_npc_offer_quests = data
+	_render_npc_quests_panel()
+
+
+func _on_npc_active_quests_received(data: Array) -> void:
+	_npc_active_quests = data
+	_render_npc_quests_panel()
+
+
+func _render_npc_quests_panel() -> void:
+	if npc_quests_panel == null:
+		return
+	for child in npc_quests_panel.get_children():
+		child.queue_free()
+
+	# 待提交优先
+	if not _npc_active_quests.is_empty():
+		var t1 := RichTextLabel.new()
+		t1.bbcode_enabled = true
+		t1.fit_content = true
+		t1.custom_minimum_size = Vector2(0, 20)
+		t1.text = "[color=orange][b][待提交][/b][/color]"
+		npc_quests_panel.add_child(t1)
+
+		for q in _npc_active_quests:
+			if not q is Dictionary:
+				continue
+			var row := HBoxContainer.new()
+			row.add_theme_constant_override("separation", 6)
+
+			var info := RichTextLabel.new()
+			info.bbcode_enabled = true
+			info.fit_content = true
+			info.custom_minimum_size = Vector2(0, 20)
+			var title_s: String = str(q.get("title", "?"))
+			var exp_r: int = int(q.get("reward_exp", 0))
+			var money_r: int = int(q.get("reward_money", 0))
+			var ready: bool = bool(q.get("ready", false))
+			var rk: String = str(q.get("require_item_kind", ""))
+			var rc: int = int(q.get("require_item_count", 0))
+			var needs_turn_in: bool = bool(q.get("needs_turn_in", false))
+
+			var status := ""
+			if needs_turn_in and rc > 0:
+				if ready:
+					status = "[color=green]（已集齐%s）[/color]" % rk
+				else:
+					status = "[color=gray]（还需%s×%d）[/color]" % [rk, rc]
+
+			info.text = "%s  (%d经验,%d钱) %s" % [title_s, exp_r, money_r, status]
+			info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			row.add_child(info)
+
+			if needs_turn_in:
+				var btn := Button.new()
+				btn.text = "提交"
+				if not ready:
+					btn.disabled = true
+				var qid: String = str(q.get("id", ""))
+				btn.pressed.connect(func(): _on_turn_in_pressed(qid))
+				row.add_child(btn)
+			else:
+				# 非 fetch 类：显示"等待触发"提示
+				var hint := Label.new()
+				hint.text = "[去目标地点]"
+				hint.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
+				row.add_child(hint)
+
+			npc_quests_panel.add_child(row)
+
+	# 可接受
+	if not _npc_offer_quests.is_empty():
+		var t2 := RichTextLabel.new()
+		t2.bbcode_enabled = true
+		t2.fit_content = true
+		t2.custom_minimum_size = Vector2(0, 20)
+		t2.text = "[color=gold][b][可接受][/b][/color]"
+		npc_quests_panel.add_child(t2)
+
+		for q in _npc_offer_quests:
+			if not q is Dictionary:
+				continue
+			var row2 := HBoxContainer.new()
+			row2.add_theme_constant_override("separation", 6)
+
+			var info2 := RichTextLabel.new()
+			info2.bbcode_enabled = true
+			info2.fit_content = true
+			info2.custom_minimum_size = Vector2(0, 20)
+			var title_s2: String = str(q.get("title", "?"))
+			var exp_r2: int = int(q.get("reward_exp", 0))
+			var money_r2: int = int(q.get("reward_money", 0))
+			var loc_label: String = str(q.get("require_location_label", ""))
+			info2.text = "%s -> %s (%d经验,%d钱)" % [title_s2, loc_label, exp_r2, money_r2]
+			info2.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			row2.add_child(info2)
+
+			var btn2 := Button.new()
+			btn2.text = "接受"
+			var qid2: String = str(q.get("id", ""))
+			var nid := current_npc_id
+			btn2.pressed.connect(func(): _on_accept_quest_pressed(nid, qid2))
+			row2.add_child(btn2)
+			npc_quests_panel.add_child(row2)
+
+
+func _on_accept_quest_pressed(npc_id: String, quest_def_id: String) -> void:
+	api.accept_npc_quest(npc_id, quest_def_id)
+
+
+func _on_quest_accepted(data: Dictionary) -> void:
+	status_label.text = "[color=gold]已接受任务：%s[/color]" % str(data.get("title", ""))
+	api.fetch_quests()
+	if current_npc_id != "":
+		api.fetch_npc_quests(current_npc_id)
+		api.fetch_npc_active_quests(current_npc_id)
+
+
+func _on_turn_in_pressed(quest_id: String) -> void:
+	api.turn_in_quest(quest_id)
+
+
+func _on_quest_turned_in(data: Dictionary) -> void:
+	if data.get("ok") == false:
+		status_label.text = "[color=red]提交失败：%s[/color]" % str(data.get("error", ""))
+		return
+	status_label.text = "[color=gold]完成任务：%s（+%d经验 +%d钱）[/color]" % [
+		str(data.get("title", "")),
+		int(data.get("reward_exp", 0)),
+		int(data.get("reward_money", 0)),
+	]
+	var p_data = data.get("player")
+	if p_data is Dictionary:
+		player_data = p_data
+		_render_player_panel()
+	# 刷新
+	api.fetch_quests()
+	api.fetch_items(200)
+	if current_npc_id != "":
+		api.fetch_npc_active_quests(current_npc_id)
+		api.fetch_npc_quests(current_npc_id)
+		api.fetch_npc_items(current_npc_id)

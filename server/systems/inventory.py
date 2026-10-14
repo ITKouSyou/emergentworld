@@ -70,4 +70,6 @@ def row_to_dict(row: ItemRow) -> dict:
         "value": row.value,
         "owner_id": row.owner_id,
         "consumed": row.consumed,
+        "durability": getattr(row, "durability", 100),
+        "max_durability": getattr(row, "max_durability", 100),
     }

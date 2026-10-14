@@ -1,0 +1,16 @@
+id: rare_item_sale
+tags: [trade, mystery, celebration]
+cooldown: 15
+weight: 1.0
+interactive: false
+conditions:
+  - director.tension < 0.7
+params:
+  participant_count: 2
+  location: market
+prompt: |
+  一位行商摆出一件稀罕物，请村人围观。
+  有识货者一眼认出它的来历，惊得说不出话。
+evaluator:
+  require: [seller, item, identifier]
+  max_reward: 0.3

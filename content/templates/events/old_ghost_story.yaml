@@ -1,0 +1,16 @@
+id: old_ghost_story
+tags: [mystery, ritual, daily]
+cooldown: 10
+weight: 1.0
+interactive: false
+conditions:
+  - director.tension < 0.6
+params:
+  participant_count: 2
+  location: tavern
+prompt: |
+  酒馆里一位老人讲起几十年前的旧事。
+  说到一半，听者中有人脸色变了。
+evaluator:
+  require: [storyteller, story_theme, listener_reaction]
+  max_reward: 0.15

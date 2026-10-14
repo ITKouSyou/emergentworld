@@ -1,0 +1,16 @@
+id: debt_collection
+tags: [conflict, trade, plot]
+cooldown: 10
+weight: 1.1
+interactive: true
+conditions:
+  - director.tension < 0.8
+params:
+  participant_count: 2
+  location: market
+prompt: |
+  债主上门讨债。欠债人一脸难色，说再宽限几日。
+  围观的村民议论纷纷，有人出言打圆场。
+evaluator:
+  require: [creditor, debtor, amount]
+  max_reward: 0.3

@@ -23,7 +23,9 @@ def _setup(s):
         reward_id="rwd_1",
         event_id="evt_1",
         name="护身符",
-        kind="信物",
+        kind="药材",       # 消耗品，可以"使用"
+        category="consumable",
+        use_effect_json='{"hp": 15}',
         affixes_json=dumps(["粗糙的"]),
         story="护身",
         value=0.4,
@@ -49,7 +51,8 @@ async def test_use_item_fallback(monkeypatch):
         world = _setup(s)
         result = await item_use.use_item(s, world, "itm_1", "player", "npc_a")
         assert result["ok"] is True
-        assert "Alden" in result["effect"]
+        # 新版效果描述固定，不再拼 NPC 名
+        assert "生命" in result["effect"] or "好感" in result["effect"]
 
 
 @pytest.mark.asyncio

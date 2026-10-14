@@ -1,0 +1,16 @@
+id: village_meeting
+tags: [political, social, plot]
+cooldown: 22
+weight: 0.9
+interactive: true
+conditions:
+  - director.tension > 0.3
+params:
+  participant_count: 5
+  location: village_hall
+prompt: |
+  村里召开大会，商议一件大事。
+  众人各抒己见，气氛渐趋紧张。
+evaluator:
+  require: [agenda, speakers, mood]
+  max_reward: 0.35

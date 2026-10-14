@@ -1,0 +1,16 @@
+id: neighbor_dispute
+tags: [conflict, daily]
+cooldown: 6
+weight: 1.2
+interactive: true
+conditions:
+  - director.tension < 0.7
+params:
+  participant_count: 2
+  location: home
+prompt: |
+  两家邻居因围墙、树荫或家禽起了争执。
+  各说各的理，围观者越来越多。
+evaluator:
+  require: [neighbor_a, neighbor_b, dispute_cause]
+  max_reward: 0.15

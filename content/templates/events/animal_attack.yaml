@@ -1,0 +1,16 @@
+id: animal_attack
+tags: [survival, combat]
+cooldown: 12
+weight: 1.0
+interactive: true
+conditions:
+  - director.tension > 0.3
+params:
+  participant_count: 2
+  location: forest
+prompt: |
+  一头受伤的野兽冲出森林，朝最近的村民扑去。
+  众人四散奔逃，有人挺身而出。
+evaluator:
+  require: [beast, defender, outcome]
+  max_reward: 0.4
