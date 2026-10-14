@@ -86,7 +86,7 @@ async def test_non_interactive_event_auto_resolves(monkeypatch):
     from server.core import event_flow
     from server.models.schemas import Reward
 
-    async def fake_fill(tpl, world, npcs, rng, player=None):
+    async def fake_fill(tpl, world, npcs, rng, player=None, event_roles=None):
         return Event(
             id="evt_auto",
             template_id=tpl.id,

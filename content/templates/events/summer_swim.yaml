@@ -1,0 +1,16 @@
+id: summer_swim
+tags: [daily, social, adventure]
+cooldown: 10
+weight: 1.0
+interactive: true
+conditions:
+  - world.season == "summer"
+params:
+  participant_count: 3
+  location: river_bend
+prompt: |
+  夏日炎热，几个村人相约到河湾戏水。
+  有人不慎呛水，众人慌乱。
+evaluator:
+  require: [1, 2, 3]
+  max_reward: 0.2

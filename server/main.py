@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import uuid as _uuid
 import random
 from contextlib import asynccontextmanager
 
@@ -235,9 +236,19 @@ async def world_step() -> dict:
         }
 
 
+def _impressions_for_npc(session, npc_id: str) -> list:
+    try:
+        from server.systems import impression as impr_sys
+        return impr_sys.describe_for_ui(session, npc_id)
+    except Exception:
+        return []
+
+
 def _npc_to_display(npc: NPC, npc_names: dict[str, str] | None = None) -> dict:
     names = npc_names or {}
     fam = npc.family
+    from server.systems import schedule as _sched_sys
+    schedule_lines = _sched_sys.describe_schedule(npc)
     family_info = {
         "spouse_id": fam.spouse,
         "spouse_name": names.get(fam.spouse, "") if fam.spouse else "",
@@ -264,6 +275,7 @@ def _npc_to_display(npc: NPC, npc_names: dict[str, str] | None = None) -> dict:
             for k, v in npc.needs.items()
         ],
         "family": family_info,
+        "schedule": schedule_lines,
     }
 
 
@@ -283,7 +295,22 @@ def get_npc(npc_id: str) -> dict:
         npcs = {n.id: n for n in all_npcs}
         if npc_id not in npcs:
             raise HTTPException(404, "npc not found")
-        return _npc_to_display(npcs[npc_id], names)
+        result = _npc_to_display(npcs[npc_id], names)
+        result["impressions"] = _impressions_for_npc(s, npc_id)
+        # 派系
+        try:
+            from server.systems import faction as faction_sys
+            npc = npcs[npc_id]
+            if npc.faction and npc.faction != "neutral":
+                meta = faction_sys.FACTIONS.get(npc.faction, {})
+                result["faction"] = npc.faction
+                result["faction_label"] = meta.get("label", npc.faction)
+            else:
+                result["faction"] = "neutral"
+                result["faction_label"] = "中立"
+        except Exception:
+            pass
+        return result
 
 
 @app.get("/npc/{npc_id}/relationships")
@@ -598,6 +625,7 @@ class TravelRequest(BaseModel):
 @app.post("/travel")
 async def travel_endpoint(req: TravelRequest) -> dict:
     """玩家移动到已发现的地点，消耗 1 tick。"""
+    import uuid as _uuid
     from server.map_layout import LOCATION_LAYOUT
 
     with get_session() as s:
@@ -696,7 +724,7 @@ def market_view() -> dict:
             raise HTTPException(400, "player not created")
         rng = _r.Random(world.seed * 77777 + world.tick * 3)
         from server.systems import market as market_sys
-        goods = market_sys.get_market_inventory(world, rng)
+        goods = market_sys.get_market_inventory(world, rng, session=s)
 
         # 玩家可卖物品
         my_items = inventory.list_items_by_owner(s, "player")
@@ -872,6 +900,16 @@ def quest_abandon(req: AbandonRequest) -> dict:
         if not result.get("ok"):
             raise HTTPException(400, result.get("error", "abandon failed"))
         return result
+
+
+@app.get("/faction")
+def faction_status() -> dict:
+    with get_session() as s:
+        from server.systems import faction as faction_sys
+        return {
+            "factions": faction_sys.player_rep_summary(s),
+            "market_discount": faction_sys.market_discount(s),
+        }
 
 
 @app.get("/event")

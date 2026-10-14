@@ -31,6 +31,25 @@ def _recent_events_for_npc(session, npc_id: str, limit: int = 5) -> list[str]:
         outcome = payload.get("outcome", "")
         state = r.state
 
+        # 检查这个 NPC 在事件里扮演什么角色
+        roles = payload.get("roles", {})
+        role_marker = ""
+        if isinstance(roles, dict):
+            for role_name, npc_in_role in roles.items():
+                if npc_in_role == npc_id:
+                    role_zh = {
+                        "mother_or_father": "家长",
+                        "child": "走失的孩子",
+                        "deceased": "逝者",
+                        "bride": "新娘",
+                        "groom": "新郎",
+                        "lover_a": "当事一方",
+                        "lover_b": "当事另一方",
+                        "parent": "父母",
+                    }.get(role_name, role_name)
+                    role_marker = "（你在其中是：%s）" % role_zh
+                    break
+
         # 判断是否"未解决"
         marker = ""
         if state == "awaiting_player":
@@ -40,7 +59,7 @@ def _recent_events_for_npc(session, npc_id: str, limit: int = 5) -> list[str]:
         elif outcome and any(kw in outcome for kw in ["还在找", "没找到", "未", "悬而未决", "继续"]):
             marker = "（事情还没了结）"
 
-        line = "- %s%s" % (summary, marker)
+        line = "- %s%s%s" % (summary, marker, role_marker)
         if outcome:
             line += "  结果：" + outcome[:40]
         lines.append(line)
@@ -87,6 +106,26 @@ async def npc_dialogue(
         quest_lines = []
     active_quests_text = "\n".join(quest_lines) or "（没有未了的事）"
 
+    # 玩家给这个 NPC 留下的印象
+    try:
+        from server.systems import impression as impr_sys
+        impression_text = impr_sys.describe_for_prompt(session, npc.id, limit=4)
+    except Exception:
+        impression_text = "（你对他还没有特别的印象）"
+
+    # 派系立场
+    faction_text = "（你不属于任何派系）"
+    try:
+        from server.systems import faction as faction_sys
+        if npc.faction and npc.faction != "neutral":
+            rep = faction_sys.get_player_faction_rep(session, npc.faction)
+            attitude = faction_sys.faction_attitude_hint(rep)
+            faction_label = faction_sys.FACTIONS.get(npc.faction, {}).get("label", npc.faction)
+            faction_text = "你属于【%s】，对玩家派系声望 %+d（%s）" % (
+                faction_label, rep, attitude)
+    except Exception:
+        pass
+
     prompt = load_prompt("dialogue.md").format(
         name=npc.name,
         age=npc.age,
@@ -97,6 +136,8 @@ async def npc_dialogue(
         relationship_hint=relationship_hint,
         recent_events=recent_text,
         active_quests=active_quests_text,
+        impression=impression_text,
+        faction_attitude=faction_text,
         memories="\n".join("- " + m for m in mem_summaries) or "（没有特别的记忆）",
         player_input=player_input,
     )

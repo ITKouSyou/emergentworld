@@ -36,6 +36,7 @@ var chronicle_title_input: LineEdit
 var reward_log: RichTextLabel
 var market_log: RichTextLabel
 var quest_log: RichTextLabel
+var faction_log: RichTextLabel
 var goal_log: RichTextLabel
 var market_buy_row: HBoxContainer
 var item_list: ItemList
@@ -143,6 +144,9 @@ func _connect_signals() -> void:
 	api.goals_received.connect(_on_goals_received)
 	api.goal_claimed.connect(_on_goal_claimed)
 	api.quest_list_received.connect(_on_quest_list_received)
+	api.factions_received.connect(_on_factions_received)
+	api.quest_abandoned.connect(_on_quest_abandoned)
+	api.request_failed.connect(_on_request_failed)
 
 func _safe_str(v) -> String:
 	if v == null:
@@ -176,10 +180,11 @@ func _build_ui() -> void:
 	split.add_theme_constant_override("separation", 8)
 	root.add_child(split)
 
-	# --- 左栏：我（加滚动）---
+	# --- 左栏：我（只允许纵向滚动）---
 	var left_scroll := ScrollContainer.new()
 	left_scroll.custom_minimum_size = Vector2(340, 0)
 	left_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	left_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	split.add_child(left_scroll)
 
 	var left_panel := VBoxContainer.new()
@@ -203,6 +208,7 @@ func _build_ui() -> void:
 	split.add_child(right_tabs)
 	_build_event_tab(right_tabs)
 	_build_quest_tab(right_tabs)
+	_build_faction_tab(right_tabs)
 	_build_chronicle_tab(right_tabs)
 	_build_market_tab(right_tabs)
 	_build_reward_tab(right_tabs)
@@ -319,6 +325,8 @@ func _build_player_tab(parent: Container) -> void:
 		var desc_lbl := Label.new()
 		desc_lbl.text = attr_desc[i]
 		desc_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		desc_lbl.clip_text = true
+		desc_lbl.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 		desc_lbl.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
 		row.add_child(desc_lbl)
 
@@ -422,6 +430,7 @@ func _build_map_tab(parent: TabContainer) -> void:
 	map_view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	map_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	map_view.npc_clicked.connect(_on_map_npc_clicked)
+	map_view.location_clicked.connect(_on_map_location_clicked)
 	parent.add_child(map_view)
 
 
@@ -895,6 +904,7 @@ func _refresh_all() -> void:
 	api.fetch_chronicles(10)
 	api.fetch_goals()
 	api.fetch_quests()
+	api.fetch_factions()
 
 func _on_i18n_received(data: Dictionary) -> void:
 	i18n_traits = data.get("traits", {})
@@ -981,11 +991,14 @@ func _on_npc_detail(data: Dictionary) -> void:
 		str(data.get("name", "?")), gender_zh, int(data.get("age", 0)),
 	])
 	lines.append("所在地：%s" % str(data.get("location_label", "")))
+	var fac_label: String = str(data.get("faction_label", ""))
+	if fac_label != "" and fac_label != "中立":
+		lines.append("所属派系：[color=gold]%s[/color]" % fac_label)
 	lines.append("")
 	lines.append("[b]性格[/b]")
-	for t in data.get("traits", []):
-		if t is Dictionary:
-			lines.append("   %s：%.2f" % [str(t.get("label", "?")), float(t.get("value", 0))])
+	for t2 in data.get("traits", []):
+		if t2 is Dictionary:
+			lines.append("   %s：%.2f" % [str(t2.get("label", "?")), float(t2.get("value", 0))])
 	lines.append("")
 	lines.append("[b]需求[/b]")
 	for n in data.get("needs", []):
@@ -996,13 +1009,28 @@ func _on_npc_detail(data: Dictionary) -> void:
 	for g in data.get("goals", []):
 		lines.append("   · %s" % str(g))
 
+	# 对你的印象（放在目标之后，家庭之前）
+	var impr: Array = data.get("impressions", [])
+	if not impr.is_empty():
+		lines.append("")
+		lines.append("[b][color=cyan]对你的印象[/color][/b]")
+		for s in impr:
+			lines.append("   · %s" % str(s))
+
+	# 日程
+	var sched: Array = data.get("schedule", [])
+	if not sched.is_empty():
+		lines.append("")
+		lines.append("[b]日常作息[/b]")
+		for s in sched:
+			lines.append("   %s" % str(s))
+
 	# 家庭
-	var fam = data.get("family", {})
+	var fam: Dictionary = data.get("family", {})
 	if fam is Dictionary:
 		var fam_lines: Array[String] = []
-		var sp: String = str(fam.get("spouse_name", ""))
-		if sp != "":
-			fam_lines.append("   配偶：%s" % sp)
+		if str(fam.get("spouse_name", "")) != "":
+			fam_lines.append("   配偶：%s" % str(fam["spouse_name"]))
 		var ch_arr = fam.get("children_names", [])
 		if ch_arr != null and ch_arr.size() > 0:
 			var ch_names: Array[String] = []
@@ -1028,8 +1056,6 @@ func _on_npc_detail(data: Dictionary) -> void:
 				lines.append(fl)
 
 	npc_detail.text = "\n".join(lines)
-
-
 func _on_npc_items(data: Array) -> void:
 	if data.is_empty():
 		npc_items_label.text = "[b]持有物[/b]\n   （空）"
@@ -2381,3 +2407,86 @@ func _force_clear_loading() -> void:
 		step24_btn.disabled = false
 	if refresh_btn:
 		refresh_btn.disabled = false
+
+
+func _on_map_location_clicked(location_id: String) -> void:
+	if not player_created:
+		return
+	var cur_loc: String = str(player_data.get("location_id", ""))
+	if location_id == cur_loc:
+		status_label.text = "[color=gray]你已经在这里了[/color]"
+		return
+
+	print("[ui] 地图点击前往：%s" % location_id)
+	if travel_btn != null and is_instance_valid(travel_btn):
+		travel_btn.disabled = true
+	if travel_result_label != null:
+		travel_result_label.text = "[i]你启程了...[/i]"
+	api.travel(location_id)
+
+
+func _build_faction_tab(parent: TabContainer) -> void:
+	var tab := VBoxContainer.new()
+	tab.name = "派系"
+	tab.add_theme_constant_override("separation", 6)
+	parent.add_child(tab)
+
+	var ctrl := HBoxContainer.new()
+	ctrl.add_theme_constant_override("separation", 6)
+	tab.add_child(ctrl)
+
+	var refresh := Button.new()
+	refresh.text = "刷新"
+	refresh.pressed.connect(func(): api.fetch_factions())
+	ctrl.add_child(refresh)
+
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	tab.add_child(scroll)
+
+	faction_log = RichTextLabel.new()
+	faction_log.bbcode_enabled = true
+	faction_log.fit_content = true
+	faction_log.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(faction_log)
+
+
+func _on_factions_received(data: Dictionary) -> void:
+	if faction_log == null:
+		return
+	faction_log.clear()
+
+	var factions: Array = data.get("factions", [])
+	var discount: float = float(data.get("market_discount", 1.0))
+
+	faction_log.append_text("[b][color=gold]◆ 派系声望[/color][/b]\n\n")
+	for f in factions:
+		if not f is Dictionary:
+			continue
+		var label: String = str(f.get("label", "?"))
+		var desc: String = str(f.get("desc", ""))
+		var value: int = int(f.get("value", 0))
+		var attitude: String = str(f.get("attitude", ""))
+
+		var color := "gray"
+		if value >= 20:
+			color = "lightgreen"
+		elif value >= 5:
+			color = "white"
+		elif value <= -20:
+			color = "red"
+		elif value <= -5:
+			color = "orange"
+
+		faction_log.append_text("[b]%s[/b]  [color=%s]%+d[/color]  [i]%s[/i]\n" % [
+			label, color, value, attitude,
+		])
+		faction_log.append_text("    [color=lightgray]%s[/color]\n\n" % desc)
+
+	faction_log.append_text("\n[b][color=cyan]◆ 市场折扣[/color][/b]\n")
+	if discount < 1.0:
+		faction_log.append_text("    商帮声望让你享受 [color=green]%.0f%%[/color] 优惠\n" % ((1.0 - discount) * 100))
+	elif discount > 1.0:
+		faction_log.append_text("    商帮态度冷淡，价格上浮 [color=red]%.0f%%[/color]\n" % ((discount - 1.0) * 100))
+	else:
+		faction_log.append_text("    无折扣\n")

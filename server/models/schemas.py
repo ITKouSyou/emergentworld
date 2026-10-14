@@ -46,6 +46,7 @@ class Player(BaseModel):
     money: int = 0
     background: str = ""
     known_npcs: list[str] = Field(default_factory=list)
+    factions: dict[str, int] = Field(default_factory=dict)
     created: bool = False
 
 
@@ -63,6 +64,11 @@ class NPC(BaseModel):
     location_id: str = "village_square"
     alive: bool = True
     family: Family = Field(default_factory=Family)
+    schedule: dict[str, str] = Field(default_factory=dict)
+    # 对玩家的印象：{ tag: count }
+    impressions: dict[str, int] = Field(default_factory=dict)
+    # 所属派系
+    faction: str = "neutral"
 
 
 class Memory(BaseModel):

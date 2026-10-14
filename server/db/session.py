@@ -46,7 +46,11 @@ def ensure_schema() -> None:
         # npc
         _add_col(conn, "npc", "gender", "gender TEXT NOT NULL DEFAULT 'unknown'")
         _add_col(conn, "npc", "family_json", "family_json TEXT NOT NULL DEFAULT '{}'")
+        _add_col(conn, "npc", "schedule_json", "schedule_json TEXT NOT NULL DEFAULT '{}'")
+        _add_col(conn, "npc", "impressions_json", "impressions_json TEXT NOT NULL DEFAULT '{}'")
+        _add_col(conn, "npc", "faction", "faction TEXT NOT NULL DEFAULT 'neutral'")
         _add_col(conn, "player", "money", "money INTEGER NOT NULL DEFAULT 0")
+        _add_col(conn, "player", "factions_json", "factions_json TEXT NOT NULL DEFAULT '{}'")
         # world
         _add_col(conn, "world", "season", "season TEXT NOT NULL DEFAULT 'spring'")
         _add_col(conn, "world", "weather", "weather TEXT NOT NULL DEFAULT 'clear'")

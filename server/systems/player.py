@@ -46,6 +46,7 @@ def load_player(session: Session) -> Optional[Player]:
         money=row.money or 0,
         background=row.background or "",
         known_npcs=loads(row.known_npcs_json) or [],
+        factions=loads(row.factions_json) or {},
         created=row.created,
     )
 
@@ -107,6 +108,7 @@ def create_player(
         money=20,
         background=background,
         known_npcs=[],
+        factions={"elder": 0, "merchant": 0, "farmer": 0},
         created=True,
     )
     save_player(session, player)

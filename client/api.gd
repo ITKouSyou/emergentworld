@@ -84,6 +84,11 @@ func fetch_quests() -> void:
 func abandon_quest(quest_id: String) -> void:
 	_request("POST", "/quest/abandon", {"quest_id": quest_id}, "quest_abandoned")
 
+signal factions_received(data: Dictionary)
+
+func fetch_factions() -> void:
+	_request("GET", "/faction", {}, "factions_received")
+
 func fetch_world_state() -> void: _request("GET", "/world/state", {}, "world_state_received")
 func step_world() -> void: _request("POST", "/world/step", {}, "event_triggered")
 func trigger_event() -> void: _request("POST", "/event/trigger", {}, "event_triggered")

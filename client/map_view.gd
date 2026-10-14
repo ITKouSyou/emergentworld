@@ -15,6 +15,7 @@ var selected_npc_id: String = ""
 var player_pos: Variant = null
 
 signal npc_clicked(npc_id: String)
+signal location_clicked(location_id: String)
 
 const MARGIN := 20.0
 const NPC_DOT_RADIUS := 5.0
@@ -120,8 +121,32 @@ func _gui_input(event: InputEvent) -> void:
 	elif event is InputEventMouseButton:
 		if event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 			_update_hover(event.position)
+			# 先判 NPC
 			if hovered_npc_id != "":
 				npc_clicked.emit(hovered_npc_id)
+				return
+			# 再判地点
+			var loc_id := _location_at(event.position)
+			if loc_id != "":
+				location_clicked.emit(loc_id)
+
+
+func _location_at(mouse_pos: Vector2) -> String:
+	var rect := _canvas_rect()
+	for loc in locations:
+		if not loc is Dictionary:
+			continue
+		if bool(loc.get("unknown", false)):
+			continue
+		var center := _norm_to_screen(
+			float(loc.get("x", 0.5)),
+			float(loc.get("y", 0.5)),
+			rect,
+		)
+		var radius := float(loc.get("radius", 0.05)) * rect.size.x
+		if mouse_pos.distance_to(center) <= radius:
+			return str(loc.get("id", ""))
+	return ""
 
 
 func _on_mouse_exited() -> void:

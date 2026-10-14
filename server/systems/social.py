@@ -78,8 +78,10 @@ async def maybe_social_dialogue(
 
     prompt = load_prompt("npc_chat.md").format(
         name_a=a.name,
+        age_a=a.age,
         goals_a="，".join(a.goals) or "（无）",
         name_b=b.name,
+        age_b=b.age,
         goals_b="，".join(b.goals) or "（无）",
         relation=rel_desc,
         location=loc_zh,

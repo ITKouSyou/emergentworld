@@ -43,6 +43,7 @@ class PlayerRow(SQLModel, table=True):
     money: int = 0
     background: str = ""
     known_npcs_json: str = "[]"
+    factions_json: str = "{}"
     created: bool = False
 
 
@@ -61,6 +62,9 @@ class NPCRow(SQLModel, table=True):
     location_id: str = "village_square"
     alive: bool = True
     family_json: str = "{}"
+    schedule_json: str = "{}"
+    impressions_json: str = "{}"
+    faction: str = "neutral"
 
 
 class MemoryRow(SQLModel, table=True):

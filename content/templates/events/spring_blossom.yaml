@@ -1,0 +1,16 @@
+id: spring_blossom
+tags: [romance, social, daily]
+cooldown: 12
+weight: 1.1
+interactive: true
+conditions:
+  - world.season == "spring"
+params:
+  participant_count: 2
+  location: forest
+prompt: |
+  春暖花开，两名年轻 NPC 不约而同来到林间赏花。
+  其中一人心事重重，另一人试图安慰。
+evaluator:
+  require: [youth_a, youth_b, mood]
+  max_reward: 0.15

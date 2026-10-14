@@ -32,6 +32,61 @@ TAG_TENSION_CENTER: dict[str, float] = {
 
 TAG_SIGMA = 0.28
 
+# 季节 → 各 tag 权重系数（乘在原有 score 上）
+SEASON_TAG_WEIGHT: dict[str, dict[str, float]] = {
+    "spring": {
+        "romance": 1.4,
+        "social": 1.2,
+        "adventure": 1.2,
+        "celebration": 1.2,
+        "survival": 0.8,
+        "conflict": 0.9,
+    },
+    "summer": {
+        "adventure": 1.3,
+        "trade": 1.2,
+        "daily": 1.2,
+        "conflict": 1.1,
+        "survival": 0.9,
+        "mystery": 1.0,
+    },
+    "autumn": {
+        "trade": 1.4,
+        "celebration": 1.4,
+        "daily": 1.2,
+        "investigation": 1.1,
+        "romance": 0.9,
+    },
+    "winter": {
+        "survival": 1.6,
+        "conflict": 1.3,
+        "ritual": 1.3,
+        "social": 0.8,
+        "romance": 0.7,
+        "trade": 0.9,
+    },
+}
+
+
+def _season_weight(tpl: EventTemplate, season: str) -> float:
+    """根据季节给模板加权。取所有 tag 的最高系数。"""
+    table = SEASON_TAG_WEIGHT.get(season)
+    if not table or not tpl.tags:
+        return 1.0
+    weights = [table.get(tag, 1.0) for tag in tpl.tags]
+    return max(weights)
+
+
+def _season_max_reward_mult(season: str) -> float:
+    """季节对奖励预算的影响。"""
+    return {
+        "spring": 1.0,
+        "summer": 1.0,
+        "autumn": 1.15,
+        "winter": 0.85,
+    }.get(season, 1.0)
+
+
 
 _COND_RE = re.compile(r"^\s*([\w\.]+)\s*(>=|<=|==|!=|>|<)\s*(.+?)\s*$")
 
@@ -214,7 +269,8 @@ def pick_template(
             continue
 
         diversity = recent_penalty(tpl.id, world)
-        score = tpl.weight * fit * diversity * rhythm
+        season_w = _season_weight(tpl, getattr(world, "season", "spring"))
+        score = tpl.weight * fit * diversity * rhythm * season_w
         if score <= 0:
             continue
         candidates.append((score, tpl))

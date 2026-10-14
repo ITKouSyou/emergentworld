@@ -1,0 +1,16 @@
+id: summer_night_market
+tags: [trade, social, celebration]
+cooldown: 18
+weight: 1.1
+interactive: true
+conditions:
+  - world.season == "summer"
+params:
+  participant_count: 4
+  location: market
+prompt: |
+  夏夜村庄办起夜市，商贩、说书人、江湖郎中齐聚。
+  有陌生人混入其中，带来远方消息。
+evaluator:
+  require: [1, 2, 3]
+  max_reward: 0.25

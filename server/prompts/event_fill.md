@@ -17,6 +17,10 @@
 模板名称：{template_label}
 模板提示：{prompt}
 参与者（**请使用这些名字**）：{participants}
+
+**具体角色（必须用这些名字）**：
+  {roles}
+
 地点：{location}（{location_label}）
 玩家：{player_name}（当前位置：{player_location}）
 当前天数：{day}

@@ -88,15 +88,23 @@ def maybe_create_quest(
     if existing:
         return None
 
-    giver = participants[0] if participants else ""
-    target = participants[1] if len(participants) > 1 else ""
+    # 优先用具体角色
+    roles = event.payload.get("roles", {})
+    giver = roles.get("mother_or_father") or (participants[0] if participants else "")
+    target = roles.get("child") or (participants[1] if len(participants) > 1 else "")
     giver_name = npc_names.get(giver, "某人")
+    target_name = npc_names.get(target, "")
 
-    title = rule["title"].format(
-        target_npc=giver_name, giver_npc=giver_name
-    )
+    if target_name and "寻找" in rule["title"]:
+        title = "寻找%s的孩子（%s）" % (giver_name, target_name)
+    else:
+        title = rule["title"].format(
+            target_npc=target_name or giver_name,
+            giver_npc=giver_name,
+        )
     description = rule["description"].format(
-        giver_npc=giver_name, target_npc=giver_name
+        giver_npc=giver_name,
+        target_npc=target_name or giver_name,
     )
 
     row = QuestRow(

@@ -40,7 +40,7 @@ SELL_MULT = 10
 BUY_MULT = 15
 
 
-def get_market_inventory(world: World, rng: random.Random) -> list[dict]:
+def get_market_inventory(world: World, rng: random.Random, session=None) -> list[dict]:
     """返回本次进市场可购买的物品（随机 4-6 件）。"""
     pool = list(SHOP_POOL)
     rng.shuffle(pool)
@@ -51,6 +51,15 @@ def get_market_inventory(world: World, rng: random.Random) -> list[dict]:
     for name, kind, base in pool[:n]:
         # 每件价格浮动 ±15%
         price_f = base * BUY_MULT * season_mult * rng.uniform(0.85, 1.15)
+        # 派系折扣
+        discount = 1.0
+        if session is not None:
+            try:
+                from server.systems import faction as faction_sys
+                discount = faction_sys.market_discount(session)
+            except Exception:
+                pass
+        price_f *= discount
         price = max(1, int(round(price_f)))
         result.append({
             "id": "shop_%s" % uuid.uuid4().hex[:6],

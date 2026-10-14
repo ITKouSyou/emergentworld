@@ -1,0 +1,16 @@
+id: winter_wolves
+tags: [survival, combat]
+cooldown: 22
+weight: 1.1
+interactive: true
+conditions:
+  - world.season == "winter"
+params:
+  participant_count: 4
+  location: village_edge
+prompt: |
+  寒冬时节，饿狼成群落进村口。
+  众人点起火把驱赶，但狼群不愿离去。
+evaluator:
+  require: [1, 2, 3]
+  max_reward: 0.5

@@ -145,6 +145,105 @@ def impossible_templates(templates, npcs) -> set:
     return result
 
 
+# 每个模板需要的具体角色
+# 值：(角色名, 从谁的什么关系里选)
+#   self  = 参与者本人
+#   child = 参与者的子女
+#   spouse = 参与者的配偶
+#   single_male / single_female = 参与者中未婚的男女
+TEMPLATE_ROLES = {
+    "lost_child": {
+        "mother_or_father": ("self", "any"),
+        "child": ("child", "any"),
+    },
+    "funeral": {
+        "deceased": ("self", "any"),
+    },
+    "wedding": {
+        "bride": ("self", "female_single"),
+        "groom": ("self", "male_single"),
+    },
+    "romance_blooms": {
+        "lover_a": ("self", "any"),
+        "lover_b": ("self", "any"),
+    },
+    "lovers_quarrel": {
+        "lover_a": ("self", "any"),
+        "lover_b": ("self", "any"),
+    },
+    "birth_of_child": {
+        "parent": ("self", "has_spouse"),
+    },
+}
+
+
+def _pick_participant_ids(tpl, npcs, rng) -> list:
+    """抽参与者 id 列表。与 fill_event 内部逻辑保持一致。"""
+    n = int(tpl.params.get("participant_count", 2))
+    n = min(n, len(npcs))
+    if n <= 0:
+        return []
+    return [npc.id for npc in rng.sample(npcs, n)]
+
+
+def _pick_roles(
+    tpl,
+    participants_ids: list[str],
+    npcs_by_id: dict,
+    rng,
+) -> dict:
+    """为模板挑选具体角色。返回 {role_name: npc_id}。"""
+    rules = TEMPLATE_ROLES.get(tpl.id)
+    if not rules:
+        return {}
+
+    chosen = [npcs_by_id[pid] for pid in participants_ids if pid in npcs_by_id]
+    if not chosen:
+        return {}
+
+    roles: dict = {}
+    used: set = set()
+
+    # 先处理 child 类型（从参与者的子女里选）
+    child_role_names = [k for k, v in rules.items() if v[0] == "child"]
+    if child_role_names:
+        all_children: list = []
+        for p_npc in chosen:
+            for cid in p_npc.family.children:
+                if cid in npcs_by_id and cid not in used:
+                    all_children.append(npcs_by_id[cid])
+        if all_children:
+            child = rng.choice(all_children)
+            for rn in child_role_names:
+                roles[rn] = child.id
+                used.add(child.id)
+
+    # 处理 self 类型
+    for role_name, (kind, filt) in rules.items():
+        if role_name in roles:
+            continue
+        pool = [n for n in chosen if n.id not in used]
+        if not pool:
+            continue
+
+        # 过滤
+        if filt == "female_single":
+            pool = [n for n in pool if n.gender == "female" and not n.family.spouse]
+        elif filt == "male_single":
+            pool = [n for n in pool if n.gender == "male" and not n.family.spouse]
+        elif filt == "has_spouse":
+            pool = [n for n in pool if n.family.spouse]
+
+        if not pool:
+            continue
+
+        pick = rng.choice(pool)
+        roles[role_name] = pick.id
+        used.add(pick.id)
+
+    return roles
+
+
 def _participants_valid(tpl, participants_ids: list[str], npcs_by_id: dict) -> bool:
     """检查事件参与者是否满足模板的前置条件。"""
     req = TEMPLATE_REQUIRES.get(tpl.id)
@@ -260,7 +359,16 @@ async def run_event_cycle(
         if tpl is None:
             return None
 
-    event = await fill_event(tpl, world, npcs, rng, player=player)
+    # 先抽一次参与者（用于选角色）—— 用同一个 rng 保持一致
+    _tmp_participants = _pick_participant_ids(tpl, npcs, rng)
+    _tmp_by_id = {n.id: n for n in npcs}
+    pre_roles = _pick_roles(tpl, _tmp_participants, _tmp_by_id, rng)
+
+    event = await fill_event(
+        tpl, world, npcs, rng,
+        player=player,
+        event_roles=pre_roles,
+    )
     event.payload["interactive"] = bool(tpl.interactive)
 
     npc_ids = {n.id for n in npcs}
@@ -282,8 +390,14 @@ async def run_event_cycle(
         print("[event] 参与者不满足 %s 的前置条件，跳过：%s" % (
             tpl.id, event.participants))
         _last_rejected_template_id = tpl.id
-        # 不写数据库
         return None
+
+    # 角色已在生成前选好，直接写入
+    if pre_roles:
+        event.payload["roles"] = pre_roles
+        role_desc = ", ".join("%s=%s" % (k, _tmp_by_id[v].name)
+                              for k, v in pre_roles.items() if v in _tmp_by_id)
+        print("[event] %s 具体角色：%s" % (tpl.id, role_desc))
 
     # 相关性判定
     relevance_ok = False
@@ -505,6 +619,32 @@ async def resolve_event(
         player_sys.add_reputation(session, rep_gain)
     elif check["result"] == "failure":
         player_sys.add_reputation(session, -1)
+
+    # 派系声望
+    try:
+        from server.systems import faction as faction_sys
+        faction_sys.apply_event_choice(
+            session, event.template_id, choice_id, event.participants,
+        )
+    except Exception as e:
+        import traceback
+        print("[event] 派系声望写入失败：%s" % e)
+        traceback.print_exc()
+
+    # 写印象
+    try:
+        from server.systems import impression as impr_sys
+        roles = payload.get("roles", {})
+        for npc_id in event.participants:
+            tags = impr_sys.tags_from_event(
+                event.template_id, choice_id, roles, npc_id,
+            )
+            for tag in tags:
+                impr_sys.add_impression(session, npc_id, tag, 1)
+    except Exception as e:
+        import traceback
+        print("[event] 印象写入失败：%s" % e)
+        traceback.print_exc()
 
     # 更新事件
     payload["choice_made"] = choice_id

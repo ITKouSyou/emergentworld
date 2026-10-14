@@ -39,7 +39,7 @@ async def test_run_event_cycle_force_with_mock_llm(monkeypatch):
     from server.models.schemas import NPC
     from server.systems import player as player_sys
 
-    async def fake_fill_event(tpl, world, npcs, rng, player=None):
+    async def fake_fill_event(tpl, world, npcs, rng, player=None, event_roles=None):
         return Event(
             id="evt_test",
             template_id=tpl.id,
@@ -95,7 +95,7 @@ async def test_run_event_cycle_no_player_auto_resolves(monkeypatch):
     from server.core.world import create_world, save_npc, save_world
     from server.models.schemas import NPC
 
-    async def fake_fill(tpl, world, npcs, rng, player=None):
+    async def fake_fill(tpl, world, npcs, rng, player=None, event_roles=None):
         return Event(
             id="evt_auto", template_id=tpl.id,
             participants=[n.id for n in npcs[:2]],

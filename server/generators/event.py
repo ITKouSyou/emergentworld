@@ -1,5 +1,4 @@
-"""事件生成器：模板 + LLM 填充 + 规则兜底。"""
-
+# 事件生成器：模板 + LLM 填充 + 规则兜底
 from __future__ import annotations
 
 import random
@@ -8,6 +7,18 @@ import uuid
 from server.generators.base import get_llm, load_prompt
 from server.i18n import location_label, template_label
 from server.models.schemas import Event, EventTemplate, NPC, Player, World
+
+
+ROLE_ZH = {
+    "mother_or_father": "家长",
+    "child": "走失的孩子",
+    "deceased": "逝者",
+    "bride": "新娘",
+    "groom": "新郎",
+    "lover_a": "当事一方",
+    "lover_b": "当事另一方",
+    "parent": "父母",
+}
 
 
 def _pick_participants(tpl: EventTemplate, npcs: list[NPC], rng: random.Random) -> list[str]:
@@ -28,12 +39,27 @@ def _fallback_payload(tpl: EventTemplate, location: str, participants: list[NPC]
     }
 
 
+def _roles_text(event_roles: dict, npcs: list[NPC]) -> str:
+    if not event_roles:
+        return "（无）"
+    parts = []
+    for role_name, npc_id in event_roles.items():
+        p_npc = next((n for n in npcs if n.id == npc_id), None)
+        if p_npc is not None:
+            role_zh = ROLE_ZH.get(role_name, role_name)
+            parts.append("%s：%s" % (role_zh, p_npc.name))
+    if not parts:
+        return "（无）"
+    return "\n  ".join(parts)
+
+
 async def fill_event(
     tpl: EventTemplate,
     world: World,
     npcs: list[NPC],
     rng: random.Random,
     player: Player | None = None,
+    event_roles: dict | None = None,
 ) -> Event:
     participants_ids = _pick_participants(tpl, npcs, rng)
     participants = [n for n in npcs if n.id in participants_ids]
@@ -45,6 +71,8 @@ async def fill_event(
         player_name = player.name
         player_loc = location_label(player.location_id)
 
+    roles_text = _roles_text(event_roles or {}, npcs)
+
     prompt = load_prompt("event_fill.md").format(
         template_id=tpl.id,
         template_label=template_label(tpl.id),
@@ -54,6 +82,7 @@ async def fill_event(
         location_label=location_label(location),
         player_name=player_name,
         player_location=player_loc,
+        roles=roles_text,
         day=world.day,
     )
     fallback = _fallback_payload(tpl, location, participants)

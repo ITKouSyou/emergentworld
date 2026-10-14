@@ -67,6 +67,9 @@ def save_npc(session: Session, npc: NPC) -> None:
     row.location_id = npc.location_id
     row.alive = npc.alive
     row.family_json = dumps(npc.family.model_dump())
+    row.schedule_json = dumps(npc.schedule)
+    row.impressions_json = dumps(npc.impressions)
+    row.faction = npc.faction
     session.add(row)
     session.commit()
 
@@ -88,6 +91,9 @@ def load_npcs(session: Session) -> list[NPC]:
             location_id=r.location_id,
             alive=r.alive,
             family=Family(**fam_data) if fam_data else Family(),
+            schedule=loads(r.schedule_json) or {},
+            impressions=loads(r.impressions_json) or {},
+            faction=r.faction or "neutral",
         ))
     return result
 

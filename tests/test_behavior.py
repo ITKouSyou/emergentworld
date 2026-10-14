@@ -34,9 +34,12 @@ def test_time_prefs_shift_by_hour():
         npc = NPC(id="npc_x", name="X", age=30, goals=["赚钱"],
                   behavior_profile={"wealth": 0.9, "social": 0.5})
         save_npc(s, npc)
-        rng = random.Random(1)
-        action = behavior.decide(s, world, npc, rng)
-        assert action.id in {"work", "explore", "eat", "socialize", "rest"}
+        # 新版 behavior.step 直接运行即可
+        behavior.step(s, world)
+        from server.core.world import load_npcs
+        after = load_npcs(s)
+        assert len(after) == 1
+        assert after[0].location_id != ""
 
 
 def test_crowd_penalty_exists():

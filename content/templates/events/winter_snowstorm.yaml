@@ -1,0 +1,16 @@
+id: winter_snowstorm
+tags: [survival, conflict]
+cooldown: 25
+weight: 1.2
+interactive: true
+conditions:
+  - world.season == "winter"
+params:
+  participant_count: 4
+  location: village_square
+prompt: |
+  暴雪封路，村中柴火与粮食告急。
+  众人为分粮争论，有人提出极端方案。
+evaluator:
+  require: [1, 2, 3]
+  max_reward: 0.5

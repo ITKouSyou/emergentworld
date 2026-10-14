@@ -1,0 +1,16 @@
+id: spring_plowing
+tags: [daily, social]
+cooldown: 15
+weight: 1.0
+interactive: true
+conditions:
+  - world.season == "spring"
+params:
+  participant_count: 3
+  location: market
+prompt: |
+  春耕开始，村里几家在争牛、争水、争人手。
+  有人当众抱怨，也有人出面调解。
+evaluator:
+  require: [dispute, mediator, agreement]
+  max_reward: 0.2

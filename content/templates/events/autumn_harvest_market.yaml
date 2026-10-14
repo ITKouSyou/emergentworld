@@ -1,0 +1,16 @@
+id: autumn_harvest_market
+tags: [trade, daily, celebration]
+cooldown: 15
+weight: 1.3
+interactive: true
+conditions:
+  - world.season == "autumn"
+params:
+  participant_count: 3
+  location: market
+prompt: |
+  秋收大集，外地商贩云集。
+  有人趁机哄抬物价，也有人掏出稀奇货物。
+evaluator:
+  require: [1, 2, 3]
+  max_reward: 0.3
