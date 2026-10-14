@@ -7,7 +7,17 @@ from sqlmodel import Session, create_engine
 
 from server.config import settings
 
-engine = create_engine(f"sqlite:///{settings.db_path}", echo=False)
+from sqlalchemy.pool import NullPool
+
+engine = create_engine(
+    f"sqlite:///{settings.db_path}",
+    echo=False,
+    poolclass=NullPool,
+    connect_args={
+        "timeout": 30,
+        "check_same_thread": False,
+    },
+)
 
 
 def get_session() -> Session:
@@ -36,6 +46,7 @@ def ensure_schema() -> None:
         # npc
         _add_col(conn, "npc", "gender", "gender TEXT NOT NULL DEFAULT 'unknown'")
         _add_col(conn, "npc", "family_json", "family_json TEXT NOT NULL DEFAULT '{}'")
+        _add_col(conn, "player", "money", "money INTEGER NOT NULL DEFAULT 0")
         # world
         _add_col(conn, "world", "season", "season TEXT NOT NULL DEFAULT 'spring'")
         _add_col(conn, "world", "weather", "weather TEXT NOT NULL DEFAULT 'clear'")

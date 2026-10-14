@@ -33,6 +33,31 @@ from server.systems import relationship
 from server.systems.relevance import check_relevance
 
 PLAYER_TIMEOUT_TICKS = 8
+
+# 最近一次因参与者不合适被拒的模板 id
+_last_rejected_template_id: str = ""
+
+
+def get_last_rejected_template_id() -> str:
+    return _last_rejected_template_id
+
+
+
+# 模板 → 参与者需满足的条件
+#   has_children  至少一人有子女
+#   has_spouse    至少一人有配偶
+#   no_spouse     至少一人未婚
+#   has_family    至少一人有家人
+TEMPLATE_REQUIRES = {
+    "lost_child": "has_spouse",
+    "romance_blooms": "no_spouse",
+    "lovers_quarrel": "has_spouse",
+    "wedding": "no_spouse",
+    "broken_promise": "has_family",
+    "funeral": "has_family",
+    "birth_of_child": "has_spouse",
+}
+
 MAX_PENDING = 3
 
 
@@ -96,6 +121,54 @@ def _apply_initial_effects(
     )
 
 
+def impossible_templates(templates, npcs) -> set:
+    """扫一遍所有 NPC，找出当前环境下不可能满足条件的模板 id。"""
+    has_children = any(n.family.children for n in npcs)
+    has_spouse = any(n.family.spouse for n in npcs)
+    no_spouse = any(not n.family.spouse and n.age >= 18 for n in npcs)
+    has_family = any(
+        n.family.spouse or n.family.children or n.family.parents
+        for n in npcs
+    )
+
+    result: set = set()
+    for tpl in templates:
+        req = TEMPLATE_REQUIRES.get(tpl.id)
+        if req == "has_children" and not has_children:
+            result.add(tpl.id)
+        elif req == "has_spouse" and not has_spouse:
+            result.add(tpl.id)
+        elif req == "no_spouse" and not no_spouse:
+            result.add(tpl.id)
+        elif req == "has_family" and not has_family:
+            result.add(tpl.id)
+    return result
+
+
+def _participants_valid(tpl, participants_ids: list[str], npcs_by_id: dict) -> bool:
+    """检查事件参与者是否满足模板的前置条件。"""
+    req = TEMPLATE_REQUIRES.get(tpl.id)
+    if not req:
+        return True
+
+    chosen = [npcs_by_id[pid] for pid in participants_ids if pid in npcs_by_id]
+    if not chosen:
+        return False
+
+    if req == "has_children":
+        return any(n.family.children for n in chosen)
+    if req == "has_spouse":
+        return any(n.family.spouse for n in chosen)
+    if req == "no_spouse":
+        return any(not n.family.spouse and n.age >= 18 for n in chosen)
+    if req == "has_family":
+        return any(
+            n.family.spouse or n.family.children or n.family.parents
+            for n in chosen
+        )
+    return True
+
+
 def _pending_rows(session: Session) -> list[EventRow]:
     return list(session.exec(
         select(EventRow).where(EventRow.state == "awaiting_player")
@@ -153,8 +226,9 @@ async def run_event_cycle(
     world: World,
     templates: list[EventTemplate],
     force: bool = False,
+    attempt: int = 0,
 ) -> Optional[Event]:
-    rng = random.Random(world.seed * 1000003 + world.tick)
+    rng = random.Random(world.seed * 1000003 + world.tick + attempt * 7919)
 
     pending = _pending_rows(session)
     if len(pending) >= MAX_PENDING:
@@ -199,6 +273,16 @@ async def run_event_cycle(
         save_event(session, event)
         director.update_tension_after_event(world, event, tpl)
         save_world(session, world)
+        return None
+
+    # 参与者合理性校验
+    global _last_rejected_template_id
+    npcs_by_id = {n.id: n for n in npcs}
+    if not _participants_valid(tpl, event.participants, npcs_by_id):
+        print("[event] 参与者不满足 %s 的前置条件，跳过：%s" % (
+            tpl.id, event.participants))
+        _last_rejected_template_id = tpl.id
+        # 不写数据库
         return None
 
     # 相关性判定

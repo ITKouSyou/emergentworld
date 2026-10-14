@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import random
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Body
 from pydantic import BaseModel
 from sqlmodel import Session, SQLModel, select
 
@@ -208,7 +209,14 @@ async def world_step() -> dict:
         social = await maybe_social_dialogue(s, world, npcs, rng)
 
         templates = director.load_templates()
-        event = await run_event_cycle(s, world, templates, force=False)
+        try:
+            event = await asyncio.wait_for(
+                run_event_cycle(s, world, templates, force=False),
+                timeout=60.0,
+            )
+        except asyncio.TimeoutError:
+            print("[world_step] 事件生成超时（60s），跳过本次事件")
+            event = None
         save_world(s, world)
 
         return {
@@ -521,6 +529,34 @@ async def action_endpoint(req: ActionRequest) -> dict:
         except Exception as e:
             print("[action] 事件记录失败：%s" % e)
 
+        # 5.5 目标记录
+        try:
+            from server.systems import goal as goal_sys
+            goal_sys.ensure_daily_goals(s, world, random.Random(world.seed + world.day))
+            goal_sys.ensure_milestones(s, world)
+
+            # 根据行动和结果映射
+            action_name = req.action
+            found_item = action_result.get("found_item") is not None
+            record_action = None
+            if action_name == "hunt" and found_item:
+                record_action = "hunt_success"
+            elif action_name == "gather":
+                record_action = "gather"
+            elif action_name == "train":
+                record_action = "train"
+            elif action_name == "socialize":
+                record_action = "socialize"
+            elif action_name == "explore":
+                record_action = "explore"
+
+            if record_action:
+                goal_sys.record_action(s, world, player, record_action, 1)
+        except Exception as e:
+            import traceback
+            print("[action] 目标记录失败：%s" % e)
+            traceback.print_exc()
+
         # 6. 物品入库
         item_data = action_result.get("found_item")
         if item_data is not None:
@@ -619,6 +655,18 @@ async def travel_endpoint(req: TravelRequest) -> dict:
             print("[travel] 事件记录失败：%s" % e)
             traceback.print_exc()
 
+        # 检查任务完成
+        completed_quests = []
+        try:
+            from server.systems import quest as quest_sys
+            p_for_check = player_sys.load_player(s)
+            if p_for_check is not None:
+                completed_quests = quest_sys.check_location_completion(s, world, p_for_check)
+        except Exception as e:
+            import traceback
+            print("[travel] 任务完成检查失败：%s" % e)
+            traceback.print_exc()
+
         save_world(s, world)
         p2 = player_sys.load_player(s)
 
@@ -632,7 +680,198 @@ async def travel_endpoint(req: TravelRequest) -> dict:
             "tick": world.tick,
             "day": world.day,
             "hour": world.hour,
+            "completed_quests": completed_quests,
         }
+
+
+# ---------- Market ----------
+
+@app.get("/market")
+def market_view() -> dict:
+    import random as _r
+    with get_session() as s:
+        world = load_world(s)
+        player = player_sys.load_player(s)
+        if player is None or not player.created:
+            raise HTTPException(400, "player not created")
+        rng = _r.Random(world.seed * 77777 + world.tick * 3)
+        from server.systems import market as market_sys
+        goods = market_sys.get_market_inventory(world, rng)
+
+        # 玩家可卖物品
+        my_items = inventory.list_items_by_owner(s, "player")
+        sell_list = []
+        for r in my_items:
+            price = market_sys.sell_price(r.value, world)
+            sell_list.append({
+                "id": r.id,
+                "name": r.name,
+                "kind": r.kind,
+                "value": r.value,
+                "sell_price": price,
+            })
+
+        return {
+            "season": world.season,
+            "season_label": i18n.season_label(world.season),
+            "season_mult": market_sys.SEASON_PRICE_MULT.get(world.season, 1.0),
+            "player_money": player.money,
+            "goods": goods,
+            "sell_list": sell_list,
+        }
+
+
+class SellRequest(BaseModel):
+    item_id: str
+
+
+@app.post("/trade/sell")
+def trade_sell(req: SellRequest) -> dict:
+    with get_session() as s:
+        world = load_world(s)
+        player = player_sys.load_player(s)
+        if player is None or not player.created:
+            raise HTTPException(400, "player not created")
+        from server.systems import market as market_sys
+        result = market_sys.sell_item(s, world, player, req.item_id)
+        if not result.get("ok"):
+            raise HTTPException(400, result.get("error", "sell failed"))
+
+        # 记录目标
+        try:
+            from server.systems import goal as goal_sys
+            import random as _r
+            goal_sys.ensure_daily_goals(s, world, _r.Random(world.seed + world.day))
+            goal_sys.ensure_milestones(s, world)
+            p2 = player_sys.load_player(s)
+            if p2 is not None:
+                goal_sys.record_action(s, world, p2, "earn_money",
+                                       int(result.get("price", 0)))
+        except Exception as e:
+            print("[sell] 目标记录失败：%s" % e)
+
+        return result
+
+
+class BuyRequest(BaseModel):
+    name: str
+    kind: str
+    price: int
+    base_value: float
+
+
+@app.post("/trade/buy")
+def trade_buy(req: BuyRequest) -> dict:
+    with get_session() as s:
+        world = load_world(s)
+        player = player_sys.load_player(s)
+        if player is None or not player.created:
+            raise HTTPException(400, "player not created")
+        from server.systems import market as market_sys
+        result = market_sys.buy_item(
+            s, world, player,
+            name=req.name, kind=req.kind,
+            price=req.price, base_value=req.base_value,
+        )
+        if not result.get("ok"):
+            raise HTTPException(400, result.get("error", "buy failed"))
+        return result
+
+
+# ---------- Goals ----------
+
+@app.get("/goal")
+def goal_list() -> dict:
+    with get_session() as s:
+        world = load_world(s)
+        from server.systems import goal as goal_sys
+        import random as _r
+        rng = _r.Random(world.seed + world.day)
+        goal_sys.ensure_daily_goals(s, world, rng)
+        goal_sys.ensure_milestones(s, world)
+        return goal_sys.list_all(s)
+
+
+class ClaimRequest(BaseModel):
+    goal_id: str
+
+
+@app.post("/goal/claim")
+def goal_claim(req: ClaimRequest) -> dict:
+    with get_session() as s:
+        world = load_world(s)
+        player = player_sys.load_player(s)
+        if player is None or not player.created:
+            raise HTTPException(400, "player not created")
+        from server.systems import goal as goal_sys
+        result = goal_sys.claim_goal(s, world, player, req.goal_id)
+        if not result.get("ok"):
+            raise HTTPException(400, result.get("error", "claim failed"))
+        p2 = player_sys.load_player(s)
+        result["player"] = _player_to_response(s, p2) if p2 else {}
+        return result
+
+
+@app.post("/goal/reset")
+def goal_reset() -> dict:
+    """清空所有目标并重建（用于调试或老数据修复）。"""
+    from sqlmodel import delete
+    from server.models.db import GoalRow
+    with get_session() as s:
+        s.exec(delete(GoalRow))
+        s.commit()
+        world = load_world(s)
+        from server.systems import goal as goal_sys
+        import random as _r
+        rng = _r.Random(world.seed + world.day)
+        goal_sys.ensure_daily_goals(s, world, rng)
+        goal_sys.ensure_milestones(s, world)
+        return {"ok": True, "reset": True}
+
+
+# ---------- Quests ----------
+
+@app.get("/quest")
+def quest_list(limit: int = 30) -> list[dict]:
+    with get_session() as s:
+        from server.systems import quest as quest_sys
+        from server.core.world import load_npcs as _load_npcs
+        npc_names = {n.id: n.name for n in _load_npcs(s)}
+        rows = quest_sys.list_all(s, limit=limit)
+        return [
+            {
+                "id": q.id,
+                "title": q.title,
+                "description": q.description,
+                "kind": q.kind,
+                "state": q.state,
+                "progress": q.progress,
+                "progress_target": q.progress_target,
+                "giver_npc_id": q.giver_npc_id,
+                "giver_name": npc_names.get(q.giver_npc_id, ""),
+                "target_location_id": q.target_location_id,
+                "target_location_label": i18n.location_label(q.target_location_id) if q.target_location_id else "",
+                "reward_exp": q.reward_exp,
+                "reward_money": q.reward_money,
+                "created_tick": q.created_tick,
+                "completed_tick": q.completed_tick,
+            }
+            for q in rows
+        ]
+
+
+class AbandonRequest(BaseModel):
+    quest_id: str
+
+
+@app.post("/quest/abandon")
+def quest_abandon(req: AbandonRequest) -> dict:
+    with get_session() as s:
+        from server.systems import quest as quest_sys
+        result = quest_sys.abandon_quest(s, req.quest_id)
+        if not result.get("ok"):
+            raise HTTPException(400, result.get("error", "abandon failed"))
+        return result
 
 
 @app.get("/event")
@@ -640,7 +879,10 @@ def list_events(limit: int = 20) -> list[dict]:
     with get_session() as s:
         npc_names = {n.id: n.name for n in load_npcs(s)}
         rows = s.exec(
-            select(EventRow).order_by(EventRow.created_at.desc()).limit(limit)
+            select(EventRow)
+            .where(EventRow.state != "rejected")
+            .order_by(EventRow.created_at.desc())
+            .limit(limit)
         ).all()
         return [_row_to_event(r, npc_names) for r in rows]
 
@@ -658,33 +900,86 @@ def list_pending_events() -> list[dict]:
 
 @app.post("/event/trigger")
 async def trigger_event() -> dict:
+    from server.core import event_flow as _ef
+
     with get_session() as s:
         world = load_world(s)
         templates = director.load_templates()
-        event = await run_event_cycle(s, world, templates, force=True)
+
+        # 预扫不可能满足的模板
+        all_npcs = load_npcs(s)
+        exclude = _ef.impossible_templates(templates, all_npcs)
+        if exclude:
+            print("[trigger] 预扫排除不可能模板：%s" % sorted(exclude))
+
+        event = None
+        tried = 0
+
+        for attempt in range(3):
+            remaining = [t for t in templates if t.id not in exclude]
+            if not remaining:
+                break
+
+            seed_extra = random.randint(0, 10**9)
+            tried += 1
+
+            # 不再用外层 wait_for，让 LLM client 自己超时（30 秒）
+            try:
+                event = await run_event_cycle(
+                    s, world, remaining,
+                    force=True, attempt=seed_extra,
+                )
+            except Exception as e:
+                print("[trigger] attempt %d 异常：%s" % (attempt, e))
+                continue
+
+            if event is not None:
+                break
+
+            rejected = _ef.get_last_rejected_template_id()
+            if rejected:
+                exclude.add(rejected)
+                print("[trigger] attempt %d 被拒：%s" % (attempt, rejected))
+
         if event is None:
-            raise HTTPException(400, "no event triggered")
+            raise HTTPException(
+                400,
+                "尝试 %d 次都没能生成合理事件，请换个时间或推进几回合" % tried,
+            )
+
         npc_names = {n.id: n.name for n in load_npcs(s)}
         row = s.get(EventRow, event.id)
+        if row is None:
+            raise HTTPException(500, "event saved but not found")
         return _row_to_event(row, npc_names)
-
-
-class ResolveRequest(BaseModel):
-    choice_id: str
-
-
 @app.post("/event/{event_id}/resolve")
-async def resolve_event_endpoint(event_id: str, req: ResolveRequest) -> dict:
+async def resolve_event_endpoint(
+    event_id: str,
+    choice_id: str = Body(..., embed=True),
+) -> dict:
+    print("[resolve] event_id=[%s] choice_id=[%s]" % (event_id, choice_id))
+
     with get_session() as s:
         world = load_world(s)
-        result = await resolve_event(s, world, event_id, req.choice_id)
+        result = await resolve_event(s, world, event_id, choice_id)
         if not result.get("ok"):
             raise HTTPException(400, result.get("error", "resolve failed"))
+
+        # 记录"参与事件"目标
+        try:
+            from server.systems import goal as goal_sys
+            import random as _r
+            goal_sys.ensure_daily_goals(s, world, _r.Random(world.seed + world.day))
+            goal_sys.ensure_milestones(s, world)
+            player = player_sys.load_player(s)
+            if player is not None:
+                goal_sys.record_action(s, world, player, "event_resolved", 1)
+        except Exception as e:
+            import traceback
+            print("[resolve] 目标记录失败：%s" % e)
+            traceback.print_exc()
+
         return result
-
-
-# ---------- Chronicle ----------
-
 @app.get("/chronicle")
 def get_chronicles(limit: int = 20) -> list[dict]:
     with get_session() as s:

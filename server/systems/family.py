@@ -68,22 +68,39 @@ def build_families(session, npcs, rng) -> None:
         used_ids.add(m.id)
         used_ids.add(f.id)
 
-    single_pool = [n for n in npcs if n.id not in used_ids]
+    # 儿童优先分配给夫妻
+    children = [n for n in npcs if n.age < 18 and n.id not in used_ids]
+    rng.shuffle(children)
+    single_pool = [n for n in npcs
+                   if n.id not in used_ids and n.id not in {c.id for c in children}]
+
+    # 每对夫妻至少领 1 个孩子（如果有）
     for m, f in couples:
-        n_children = rng.choice([0, 0, 1, 1, 2])
-        for _ in range(n_children):
-            if not single_pool:
-                break
-            single_pool.sort(key=lambda x: x.age)
-            child = single_pool.pop(0)
-            if child.age > m.age - 15 or child.age > f.age - 15:
-                single_pool.append(child)
-                continue
+        if not children:
+            break
+        # 70% 概率生孩子
+        if rng.random() < 0.3:
+            continue
+        child = children.pop(0)
+        child.family.parents = [m.id, f.id]
+        m.family.children.append(child.id)
+        f.family.children.append(child.id)
+        _set_family_baseline(session, m.id, child.id, "parent")
+        _set_family_baseline(session, f.id, child.id, "parent")
+        used_ids.add(child.id)
+
+    # 剩下的孩子看运气加给夫妻
+    for m, f in couples:
+        if not children:
+            break
+        if rng.random() < 0.4:
+            child = children.pop(0)
             child.family.parents = [m.id, f.id]
             m.family.children.append(child.id)
             f.family.children.append(child.id)
             _set_family_baseline(session, m.id, child.id, "parent")
             _set_family_baseline(session, f.id, child.id, "parent")
+            used_ids.add(child.id)
 
     remaining = [n for n in npcs if not n.family.spouse and not n.family.parents]
     rng.shuffle(remaining)

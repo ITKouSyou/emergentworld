@@ -34,6 +34,10 @@ var event_action_panel: VBoxContainer
 var chronicle_log: RichTextLabel
 var chronicle_title_input: LineEdit
 var reward_log: RichTextLabel
+var market_log: RichTextLabel
+var quest_log: RichTextLabel
+var goal_log: RichTextLabel
+var market_buy_row: HBoxContainer
 var item_list: ItemList
 var item_detail: RichTextLabel
 var use_btn: Button
@@ -89,19 +93,20 @@ func _ready() -> void:
 	_connect_signals()
 	_build_ui()
 	_ensure_action_ui()
+	_build_goal_section()
 	_build_travel_row()
 	# 先拉玩家，再拉 i18n
 	api.fetch_player()
 	api.fetch_i18n()
 
 	map_poll_timer = Timer.new()
-	map_poll_timer.wait_time = 1.2
+	map_poll_timer.wait_time = 3.0
 	map_poll_timer.autostart = true
 	map_poll_timer.timeout.connect(func(): api.fetch_map())
 	add_child(map_poll_timer)
 
 	var npc_poll_timer := Timer.new()
-	npc_poll_timer.wait_time = 3.0
+	npc_poll_timer.wait_time = 6.0
 	npc_poll_timer.autostart = true
 	npc_poll_timer.timeout.connect(func():
 		if player_created:
@@ -133,8 +138,11 @@ func _connect_signals() -> void:
 	api.chronicle_generated.connect(_on_chronicle_generated)
 	api.action_done.connect(_on_action_done)
 	api.travel_done.connect(_on_travel_done)
-	api.request_failed.connect(_on_request_failed)
-
+	api.market_received.connect(_on_market_received)
+	api.trade_done.connect(_on_trade_done)
+	api.goals_received.connect(_on_goals_received)
+	api.goal_claimed.connect(_on_goal_claimed)
+	api.quest_list_received.connect(_on_quest_list_received)
 
 func _safe_str(v) -> String:
 	if v == null:
@@ -168,11 +176,16 @@ func _build_ui() -> void:
 	split.add_theme_constant_override("separation", 8)
 	root.add_child(split)
 
-	# --- 左栏：我 ---
+	# --- 左栏：我（加滚动）---
+	var left_scroll := ScrollContainer.new()
+	left_scroll.custom_minimum_size = Vector2(340, 0)
+	left_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	split.add_child(left_scroll)
+
 	var left_panel := VBoxContainer.new()
-	left_panel.custom_minimum_size = Vector2(340, 0)
+	left_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	left_panel.add_theme_constant_override("separation", 6)
-	split.add_child(left_panel)
+	left_scroll.add_child(left_panel)
 	_build_player_tab(left_panel)
 
 	# --- 中栏：地图 / 人物 ---
@@ -189,7 +202,9 @@ func _build_ui() -> void:
 	right_tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	split.add_child(right_tabs)
 	_build_event_tab(right_tabs)
+	_build_quest_tab(right_tabs)
 	_build_chronicle_tab(right_tabs)
+	_build_market_tab(right_tabs)
 	_build_reward_tab(right_tabs)
 	_build_item_tab(right_tabs)
 	_ensure_explore_ui()
@@ -268,7 +283,7 @@ func _build_player_tab(parent: Container) -> void:
 	player_tab_panel.add_child(player_stats_label)
 
 	var attr_title := Label.new()
-	attr_title.text = "属性（可分配点会亮起 [+]）"
+	attr_title.text = "属性（可分配点 [+] 可加到 20，行动自然成长上限 15）"
 	player_tab_panel.add_child(attr_title)
 
 	var attr_box := VBoxContainer.new()
@@ -347,6 +362,16 @@ func _render_player_panel() -> void:
 	if bg != "":
 		lines.append("[b]出身：[/b]%s" % bg)
 	lines.append("[b]等级：[/b]%d   [b]经验：[/b]%d / %d" % [level, exp, exp_next])
+	var hp: int = int(player_data.get("hp", 100))
+	var max_hp: int = int(player_data.get("max_hp", 100))
+	var hp_color := "lightgreen"
+	if max_hp > 0 and hp < max_hp * 0.3:
+		hp_color = "red"
+	elif max_hp > 0 and hp < max_hp * 0.7:
+		hp_color = "yellow"
+	lines.append("[b]生命：[/b][color=%s]%d / %d[/color]" % [hp_color, hp, max_hp])
+	var money: int = int(player_data.get("money", 0))
+	lines.append("[b]铜钱：[/b][color=gold]%d[/color]" % money)
 	lines.append("[b]可分配点：[/b]%d" % unspent)
 	lines.append("[b]声誉：[/b]%d" % rep)
 	# 优先用 i18n 表，fallback 用硬编码
@@ -819,6 +844,14 @@ func _on_loading_tick() -> void:
 	var elapsed := (Time.get_ticks_msec() - loading_started_ms) / 1000.0
 	loading_label.text = "⏳ %s (%.1fs)" % [loading_message, elapsed]
 
+	# 兜底：超过 90 秒强制清除
+	if elapsed > 90.0:
+		print("[ui] loading 超过 90 秒，强制清除")
+		is_step_24_running = false
+		step_24_done = 0
+		_set_loading("")
+		status_label.text = "[color=red]请求超时（90s），请再试一次[/color]"
+
 
 func _on_step_once() -> void:
 	_set_loading("正在推进...")
@@ -855,12 +888,13 @@ func _refresh_all() -> void:
 		return
 	api.fetch_world_state()
 	api.fetch_npcs()
-	api.fetch_events(30)
+	api.fetch_events(50)
 	api.fetch_rewards(20)
 	api.fetch_items(100)
 	api.fetch_map()
 	api.fetch_chronicles(10)
-
+	api.fetch_goals()
+	api.fetch_quests()
 
 func _on_i18n_received(data: Dictionary) -> void:
 	i18n_traits = data.get("traits", {})
@@ -1051,18 +1085,24 @@ func _on_event_triggered(data: Dictionary) -> void:
 	else:
 		_set_loading("")
 
-	if data.has("event_summary") and data.get("event_summary") != null:
-		var summary: String = str(data.get("event_summary", ""))
-		var tpl_label: String = str(data.get("template_label", ""))
-		if summary != "":
-			event_log.append_text("\n[color=orange]→[/color] [b]%s[/b] %s" % [tpl_label, summary])
+	var new_event_id: String = str(data.get("event", ""))
+	var tpl_label: String = str(data.get("template_label", ""))
+	var summary: String = str(data.get("event_summary", ""))
+	var awaiting: bool = bool(data.get("awaiting_player", false))
+
+	# 先给用户一个明确的"刚刚发生了什么"提示
+	if new_event_id != "" and summary != "":
+		var marker := "☆ 新事件"
+		if awaiting:
+			marker = "★ 等你决定"
+		status_label.text = "[color=orange]%s：%s[/color]" % [marker, tpl_label]
 
 	if data.has("social_dialogue") and data.get("social_dialogue") != null:
 		var sd = data.get("social_dialogue")
 		if sd is Dictionary:
 			_render_social(sd)
 
-	api.fetch_events(30)
+	api.fetch_events(50)
 	api.fetch_rewards(20)
 	api.fetch_items(100)
 	api.fetch_map()
@@ -1113,36 +1153,67 @@ func _render_event_list() -> void:
 	pending_events_by_id.clear()
 
 	var awaiting: Array = []
-	var others: Array = []
+	var world_events: Array = []
+	var player_actions: Array = []
+
 	for e in all_events_cache:
 		if not e is Dictionary:
 			continue
 		if bool(e.get("awaiting_player", false)):
 			pending_events_by_id[str(e.get("id", ""))] = e
+
 		if not _event_matches_filter(e):
 			continue
+
 		if bool(e.get("awaiting_player", false)):
 			awaiting.append(e)
-		else:
-			others.append(e)
+			continue
 
+		# 检查是否玩家的行动
+		var tags: Array = e.get("tags", [])
+		var is_action: bool = tags.has("action")
+		var payload = e.get("payload", {})
+		if payload is Dictionary and bool(payload.get("is_player_action", false)):
+			is_action = true
+
+		if is_action:
+			player_actions.append(e)
+		else:
+			world_events.append(e)
+
+	# 1. 待处理
 	if not awaiting.is_empty():
 		event_log.append_text("[b][color=orange]=== 等待你的决定 ===[/color][/b]\n\n")
 		for e in awaiting:
 			_render_event_entry(e, true)
-		if not others.is_empty():
-			event_log.append_text("\n[b]其它事件[/b]\n\n")
+		event_log.append_text("\n")
 
-	for e in others:
-		_render_event_entry(e, false)
+	# 2. 世界事件
+	if not world_events.is_empty():
+		event_log.append_text("[b]—— 世界事件 ——[/b]\n\n")
+		for e in world_events:
+			_render_event_entry(e, false)
+		event_log.append_text("\n")
+
+	# 3. 玩家行动（折叠到最下面）
+	if not player_actions.is_empty():
+		event_log.append_text("[b][color=gray]—— 我的行动 ——[/color][/b]\n\n")
+		for e in player_actions:
+			_render_event_entry(e, false)
 
 	_refresh_event_action_panel()
-
-
 func _render_event_entry(e: Dictionary, pending: bool) -> void:
 	var eid: String = _safe_str(e.get("id", ""))
+	var is_action := false
+	var p2 = e.get("payload", {})
+	if p2 is Dictionary and bool(p2.get("is_player_action", false)):
+		is_action = true
 	var state: String = str(e.get("state", ""))
 	var state_zh: String = str(e.get("state_label", state))
+	var created_at: int = int(e.get("created_at", 0))
+	var eid_short: String = eid
+	if eid.length() > 10:
+		eid_short = eid.substr(eid.length() - 6)
 	var as_message: bool = bool(e.get("as_message", false))
 
 	var tpl_label: String = _safe_str(e.get("template_label", e.get("template_id", "?")))
@@ -1165,8 +1236,8 @@ func _render_event_entry(e: Dictionary, pending: bool) -> void:
 	var rep_gain: int = int(e.get("rep_gain", 0))
 
 	if pending:
-		event_log.append_text("[color=orange]·[/color] [url=%s][b]%s[/b] %s（%s，%s）[/url]\n" % [
-			eid, tpl_label, names_str, loc_label, state_zh,
+		event_log.append_text("[color=orange]·[/color] [color=gray][第 %d 回合][/color] [url=%s][b]%s[/b] %s（%s，%s）[/url]\n" % [
+			created_at, eid, tpl_label, names_str, loc_label, state_zh,
 		])
 		if narrative != "":
 			event_log.append_text("    [i]%s[/i]\n" % narrative)
@@ -1180,8 +1251,8 @@ func _render_event_entry(e: Dictionary, pending: bool) -> void:
 		elif state == "rejected":
 			color = "dimgray"
 
-		event_log.append_text("[color=%s]·[/color] [b]%s[/b] %s（%s，%s）\n" % [
-			color, tpl_label, names_str, loc_label, state_zh,
+		event_log.append_text("[color=%s]·[/color] [color=gray][第 %d 回合 #%s][/color] [b]%s[/b] %s（%s，%s）\n" % [
+			color, created_at, eid_short, tpl_label, names_str, loc_label, state_zh,
 		])
 		if summary != "":
 			event_log.append_text("    %s\n" % summary)
@@ -1253,6 +1324,10 @@ func _refresh_event_action_panel() -> void:
 		return
 
 	var e: Dictionary = pending_events_by_id[current_event_id]
+	print("[ui] 事件 %s 的 choices = %s" % [
+		current_event_id,
+		JSON.stringify(e.get("choices", [])),
+	])
 	var title := Label.new()
 	title.text = "你打算怎么做？ —— %s" % str(e.get("template_label", ""))
 	event_action_panel.add_child(title)
@@ -1285,6 +1360,10 @@ func _refresh_event_action_panel() -> void:
 
 
 func _on_event_choice_pressed(event_id: String, choice_id: String) -> void:
+	print("[ui] 用户点击选项：event_id=[%s] choice_id=[%s]" % [event_id, choice_id])
+	if event_id == "" or choice_id == "":
+		print("[ui] 参数为空，忽略")
+		return
 	_set_loading("正在结算（调用 LLM）...")
 	for child in event_action_panel.get_children():
 		_disable_recursive(child)
@@ -1589,9 +1668,25 @@ func _on_explore_done(data: Dictionary) -> void:
 		])
 
 	# message
+	var combat = data.get("combat")
+	if combat is Dictionary:
+		var enemy: String = str(combat.get("enemy", ""))
+		if enemy != "":
+			lines.append("")
+			lines.append("[color=red]⚔ 遭遇：%s[/color]" % enemy)
+
 	var msg: String = str(data.get("message", ""))
 	if msg != "":
 		lines.append(msg)
+
+	var hp_before = data.get("hp_before")
+	var hp_after = data.get("hp_after")
+	if hp_before != null and hp_after != null:
+		var dmg: int = int(data.get("damage", 0))
+		if dmg > 0:
+			lines.append("[color=red]损失生命 %d（现 %d）[/color]" % [dmg, int(hp_after)])
+		else:
+			lines.append("[color=lightgreen]安然无恙[/color]")
 
 	# item
 	var it = data.get("found_item")
@@ -1771,6 +1866,14 @@ func _on_action_done(data: Dictionary) -> void:
 	if exp_gain > 0:
 		lines.append("[color=yellow]经验 +%d[/color]" % exp_gain)
 
+	# 属性成长
+	var growth = data.get("attribute_growth")
+	if growth is Dictionary:
+		var attr_label: String = str(growth.get("attribute_label", ""))
+		var new_val: int = int(growth.get("new_value", 0))
+		if attr_label != "":
+			lines.append("[color=gold]★ %s 提升到 %d[/color]" % [attr_label, new_val])
+
 	# 世界事件
 	var we = data.get("world_event")
 	if we is Dictionary:
@@ -1808,7 +1911,7 @@ func _on_action_done(data: Dictionary) -> void:
 	# 刷新世界
 	api.fetch_world_state()
 	api.fetch_map()
-	api.fetch_events(30)
+	api.fetch_events(50)
 	api.fetch_items(100)
 	api.fetch_npcs()
 
@@ -1910,7 +2013,7 @@ func _on_travel_done(data: Dictionary) -> void:
 
 	api.fetch_world_state()
 	api.fetch_map()
-	api.fetch_events(30)
+	api.fetch_events(50)
 
 
 func _replace_template_ids(text: String) -> String:
@@ -1955,3 +2058,326 @@ func _color_name(npc_name: String) -> String:
 				color = "#88b8f0"
 			return "[color=%s]%s[/color]" % [color, npc_name]
 	return npc_name
+
+
+func _build_market_tab(parent: TabContainer) -> void:
+	var tab := VBoxContainer.new()
+	tab.name = "市场"
+	tab.add_theme_constant_override("separation", 6)
+	parent.add_child(tab)
+
+	var ctrl := HBoxContainer.new()
+	ctrl.add_theme_constant_override("separation", 6)
+	tab.add_child(ctrl)
+
+	var refresh := Button.new()
+	refresh.text = "刷新行情"
+	refresh.pressed.connect(func(): api.fetch_market())
+	ctrl.add_child(refresh)
+
+	var season_hint := Label.new()
+	season_hint.text = "（季节影响价格）"
+	season_hint.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
+	ctrl.add_child(season_hint)
+
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	tab.add_child(scroll)
+
+	market_log = RichTextLabel.new()
+	market_log.bbcode_enabled = true
+	market_log.fit_content = true
+	market_log.meta_clicked.connect(_on_market_meta_clicked)
+	market_log.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(market_log)
+
+
+func _on_market_received(data: Dictionary) -> void:
+	if market_log == null:
+		return
+	market_log.clear()
+
+	var season_label: String = str(data.get("season_label", ""))
+	var season_mult: float = float(data.get("season_mult", 1.0))
+	var money: int = int(data.get("player_money", 0))
+
+	market_log.append_text("[b]当前季节：[/b]%s（价格 ×%.2f）\n" % [season_label, season_mult])
+	market_log.append_text("[b]你的铜钱：[/b][color=gold]%d[/color]\n\n" % money)
+
+	# 可购买
+	market_log.append_text("[b][color=orange]◆ 市场货物[/color][/b]\n")
+	var goods: Array = data.get("goods", [])
+	if goods.is_empty():
+		market_log.append_text("  （空）\n")
+	else:
+		for g in goods:
+			if not g is Dictionary:
+				continue
+			var name := str(g.get("name", "?"))
+			var kind := str(g.get("kind", ""))
+			var price := int(g.get("price", 0))
+			var bv := float(g.get("base_value", 0))
+			var can_afford := money >= price
+			var color := "white" if can_afford else "dimgray"
+			market_log.append_text(
+				"[color=%s]·[/color] [url=buy:%s|%s|%d|%.3f][b]%s[/b]（%s）  [color=gold]%d 钱[/color][/url]\n"
+				% [color, name, kind, price, bv, name, kind, price]
+			)
+		market_log.append_text("\n[i]点击货物买入[/i]\n\n")
+
+	# 可卖出
+	market_log.append_text("[b][color=cyan]◆ 你可卖出[/color][/b]\n")
+	var sell_list: Array = data.get("sell_list", [])
+	if sell_list.is_empty():
+		market_log.append_text("  （你身上没有可卖的东西）\n")
+	else:
+		for it in sell_list:
+			if not it is Dictionary:
+				continue
+			var iname := str(it.get("name", "?"))
+			var ikind := str(it.get("kind", ""))
+			var iprice := int(it.get("sell_price", 0))
+			var iid := str(it.get("id", ""))
+			market_log.append_text(
+				"[url=sell:%s][b]%s[/b]（%s）  [color=gold]卖 %d 钱[/color][/url]\n"
+				% [iid, iname, ikind, iprice]
+			)
+		market_log.append_text("\n[i]点击物品卖出[/i]\n")
+
+
+func _on_market_meta_clicked(meta) -> void:
+	var s := str(meta)
+	if s.begins_with("sell:"):
+		var item_id := s.substr(5)
+		api.trade_sell(item_id)
+	elif s.begins_with("buy:"):
+		var rest := s.substr(4)
+		var parts := rest.split("|")
+		if parts.size() >= 4:
+			var name := str(parts[0])
+			var kind := str(parts[1])
+			var price := int(parts[2])
+			var bv := float(parts[3])
+			api.trade_buy(name, kind, price, bv)
+
+
+func _on_trade_done(data: Dictionary) -> void:
+	# 交易完成，刷新市场 + 物品 + 玩家
+	api.fetch_market()
+	api.fetch_items(100)
+	api.fetch_player()
+
+
+func _build_goal_section() -> void:
+	# 在"我"面板里追加目标区（在属性标题之前）
+	if player_tab_panel == null:
+		return
+	if goal_log != null and is_instance_valid(goal_log):
+		return
+
+	var insert_index := player_tab_panel.get_child_count()
+	for i in range(player_tab_panel.get_child_count()):
+		var c := player_tab_panel.get_child(i)
+		if c is Label:
+			var lbl := c as Label
+			if lbl.text.begins_with("属性"):
+				insert_index = i
+				break
+
+	var title := Label.new()
+	title.text = "[目标]"
+	title.add_theme_font_size_override("font_size", 16)
+
+	goal_log = RichTextLabel.new()
+	goal_log.bbcode_enabled = true
+	goal_log.fit_content = true
+	goal_log.meta_clicked.connect(_on_goal_meta_clicked)
+	goal_log.custom_minimum_size = Vector2(0, 120)
+
+	player_tab_panel.add_child(title)
+	player_tab_panel.move_child(title, insert_index)
+	player_tab_panel.add_child(goal_log)
+	player_tab_panel.move_child(goal_log, insert_index + 1)
+
+
+func _on_goals_received(data: Dictionary) -> void:
+	if goal_log == null:
+		return
+	goal_log.clear()
+
+	var daily: Array = data.get("daily", [])
+	var milestones: Array = data.get("milestones", [])
+
+	goal_log.append_text("[color=gold]◆ 今日[/color]\n")
+	if daily.is_empty():
+		goal_log.append_text("  （无）\n")
+	for g in daily:
+		if not g is Dictionary:
+			continue
+		_render_goal(g)
+	goal_log.append_text("\n[color=cyan]◆ 长期[/color]\n")
+	for g in milestones:
+		if not g is Dictionary:
+			continue
+		_render_goal(g)
+
+
+func _render_goal(g: Dictionary) -> void:
+	var label: String = str(g.get("label", "?"))
+	var progress: int = int(g.get("progress", 0))
+	var target: int = int(g.get("target", 1))
+	var done: bool = bool(g.get("done", false))
+	var claimed: bool = bool(g.get("claimed", false))
+	var gid: String = str(g.get("id", ""))
+	var exp_r: int = int(g.get("exp_reward", 0))
+	var money_r: int = int(g.get("money_reward", 0))
+
+	if claimed:
+		goal_log.append_text("  [color=dimgray]✓ %s  (已领取)[/color]\n" % label)
+		return
+	if done:
+		var reward := []
+		if exp_r > 0:
+			reward.append("经验 +%d" % exp_r)
+		if money_r > 0:
+			reward.append("铜钱 +%d" % money_r)
+		goal_log.append_text("  [color=gold][url=claim:%s][b]★ %s[/b]  [领取：%s][/url][/color]\n" % [
+			gid, label, "、".join(reward),
+		])
+		return
+
+	goal_log.append_text("  · %s  (%d/%d)\n" % [label, progress, target])
+
+
+func _on_goal_meta_clicked(meta) -> void:
+	var s := str(meta)
+	if s.begins_with("claim:"):
+		api.claim_goal(s.substr(6))
+
+
+func _on_goal_claimed(data: Dictionary) -> void:
+	# 刷新玩家 + 目标
+	api.fetch_player()
+	api.fetch_goals()
+
+
+func _build_quest_tab(parent: TabContainer) -> void:
+	var tab := VBoxContainer.new()
+	tab.name = "任务"
+	tab.add_theme_constant_override("separation", 6)
+	parent.add_child(tab)
+
+	var ctrl := HBoxContainer.new()
+	ctrl.add_theme_constant_override("separation", 6)
+	tab.add_child(ctrl)
+
+	var refresh := Button.new()
+	refresh.text = "刷新任务"
+	refresh.pressed.connect(func(): api.fetch_quests())
+	ctrl.add_child(refresh)
+
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	tab.add_child(scroll)
+
+	quest_log = RichTextLabel.new()
+	quest_log.bbcode_enabled = true
+	quest_log.fit_content = true
+	quest_log.meta_clicked.connect(_on_quest_meta_clicked)
+	quest_log.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(quest_log)
+
+
+func _on_quest_list_received(data: Array) -> void:
+	if quest_log == null:
+		return
+	quest_log.clear()
+
+	if data.is_empty():
+		quest_log.text = "[i]你还没有接到任何任务。触发一些事件后，可能会有人找上你。[/i]"
+		return
+
+	var active: Array = []
+	var done: Array = []
+	for q in data:
+		if not q is Dictionary:
+			continue
+		var st: String = str(q.get("state", ""))
+		if st == "active":
+			active.append(q)
+		elif st in ["completed", "failed", "abandoned"]:
+			done.append(q)
+
+	if not active.is_empty():
+		quest_log.append_text("[b][color=orange]=== 进行中 ===[/color][/b]\n\n")
+		for q in active:
+			_render_quest_entry(q, true)
+
+	if not done.is_empty():
+		quest_log.append_text("\n[b][color=gray]=== 已结束 ===[/color][/b]\n\n")
+		for q in done:
+			_render_quest_entry(q, false)
+
+
+func _render_quest_entry(q: Dictionary, active: bool) -> void:
+	var qid: String = str(q.get("id", ""))
+	var title: String = str(q.get("title", "?"))
+	var desc: String = str(q.get("description", ""))
+	var giver: String = str(q.get("giver_name", ""))
+	var loc_label: String = str(q.get("target_location_label", ""))
+	var state: String = str(q.get("state", ""))
+	var exp_r: int = int(q.get("reward_exp", 0))
+	var money_r: int = int(q.get("reward_money", 0))
+
+	if active:
+		quest_log.append_text("[b][color=gold]◆ %s[/color][/b]\n" % title)
+		if desc != "":
+			quest_log.append_text("    %s\n" % desc)
+		if giver != "":
+			quest_log.append_text("    [color=lightgray]委托人：%s[/color]\n" % giver)
+		if loc_label != "":
+			quest_log.append_text("    [color=cyan]目标地点：%s[/color]\n" % loc_label)
+
+		var rewards: Array[String] = []
+		if exp_r > 0:
+			rewards.append("经验 +%d" % exp_r)
+		if money_r > 0:
+			rewards.append("铜钱 +%d" % money_r)
+		if not rewards.is_empty():
+			quest_log.append_text("    [color=yellow]奖励：%s[/color]\n" % "、".join(rewards))
+
+		quest_log.append_text("    [url=abandon:%s][放弃任务][/url]\n\n" % qid)
+	else:
+		var color := "dimgray"
+		var state_label := "已结束"
+		if state == "completed":
+			color = "lightgreen"
+			state_label = "✓ 已完成"
+		elif state == "abandoned":
+			color = "darkgray"
+			state_label = "已放弃"
+		quest_log.append_text("[color=%s]· %s（%s）[/color]\n\n" % [color, title, state_label])
+
+
+func _on_quest_meta_clicked(meta) -> void:
+	var s := str(meta)
+	if s.begins_with("abandon:"):
+		api.abandon_quest(s.substr(8))
+
+
+func _on_quest_abandoned(data: Dictionary) -> void:
+	api.fetch_quests()
+
+
+func _force_clear_loading() -> void:
+	is_step_24_running = false
+	step_24_done = 0
+	_set_loading("")
+	if trigger_btn:
+		trigger_btn.disabled = false
+	if step_btn:
+		step_btn.disabled = false
+	if step24_btn:
+		step24_btn.disabled = false
+	if refresh_btn:
+		refresh_btn.disabled = false

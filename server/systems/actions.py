@@ -61,6 +61,39 @@ HUNT_POOL = {
 }
 
 
+def _apply_growth(session, world, player, action_result: dict, rng):
+    """行动完成后，根据判定结果尝试属性成长。"""
+    check = action_result.get("check")
+    if not check or not isinstance(check, dict):
+        return
+
+    result = check.get("result")
+    attribute = check.get("attribute")
+    if not result or not attribute:
+        return
+
+    grew = player_sys.try_natural_growth(
+        session, player, attribute, result, rng,
+    )
+    if grew:
+        action_result["attribute_growth"] = {
+            "attribute": attribute,
+            "attribute_label": _attr_label(attribute),
+            "new_value": int(player.attributes.get(attribute, 5)),
+        }
+
+
+def _attr_label(key: str) -> str:
+    return {
+        "strength": "力量",
+        "agility": "敏捷",
+        "intelligence": "智慧",
+        "perception": "感知",
+        "charisma": "魅力",
+        "luck": "运气",
+    }.get(key, key)
+
+
 def get_discovered(session: Session, world_id: str) -> list[str]:
     row = session.get(WorldRow, world_id)
     if row is None:
@@ -116,16 +149,20 @@ async def do_action(session: Session, world: World, player: Player, action: str)
     }
 
     if action == "explore":
-        return await _do_explore(session, world, player, origin, rng, result)
-    if action == "gather":
-        return _do_gather(session, world, player, origin, rng, result)
-    if action == "hunt":
-        return _do_hunt(session, world, player, origin, rng, result)
-    if action == "train":
-        return _do_train(session, world, player, rng, result)
-    if action == "socialize":
-        return _do_socialize(session, world, player, rng, result)
-    return result
+        out = await _do_explore(session, world, player, origin, rng, result)
+    elif action == "gather":
+        out = _do_gather(session, world, player, origin, rng, result)
+    elif action == "hunt":
+        out = _do_hunt(session, world, player, origin, rng, result)
+    elif action == "train":
+        out = _do_train(session, world, player, rng, result)
+    elif action == "socialize":
+        out = _do_socialize(session, world, player, rng, result)
+    else:
+        out = result
+
+    _apply_growth(session, world, player, out, rng)
+    return out
 
 
 async def _do_explore(session, world, player, origin, rng, result):
@@ -218,26 +255,96 @@ def _do_hunt(session, world, player, origin, rng, result):
         result["exp_gain"] = 2
         return result
 
-    check = player_sys.roll_check(player, "agility", "normal", rng)
-    result["check"] = check
+    # 第一步：潜行（敏捷）
+    stealth = player_sys.roll_check(player, "agility", "normal", rng)
+    result["check"] = stealth
 
-    if check["result"] in ("critical", "success"):
+    if stealth["result"] in ("critical", "success"):
         name, kind = rng.choice(pool)
         result["found_item"] = _make_item(name, kind, "在%s猎得。" % location_label(origin), rng)
-        result["exp_gain"] = 25 if check["result"] == "critical" else 15
-        result["message"] = "你猎到一只猎物。"
+        result["exp_gain"] = 25 if stealth["result"] == "critical" else 15
+        result["message"] = "你悄无声息地接近了猎物，一击得手。"
         result["summary"] = "你在%s猎得【%s】" % (location_label(origin), name)
-    elif check["result"] == "partial":
+        player_sys.add_exp(session, result["exp_gain"])
+        return result
+
+    if stealth["result"] == "partial":
         result["message"] = "你追了一阵，猎物跑掉了。"
         result["exp_gain"] = 8
         result["summary"] = "你在%s打猎，追了一阵，猎物跑了" % location_label(origin)
-    else:
-        result["message"] = "你什么都没猎到。"
-        result["exp_gain"] = 3
-        result["summary"] = "你在%s打猎，空手而归" % location_label(origin)
-
-    if result["exp_gain"] > 0:
         player_sys.add_exp(session, result["exp_gain"])
+        return result
+
+    # 失败：激怒野兽，进入战斗
+    beasts_by_loc = {
+        "forest": [("野猪", 12, 2), ("野狼", 10, 3)],
+        "deep_forest": [("野猪王", 20, 4), ("黑熊", 25, 5), ("猛虎", 30, 6)],
+        "village_edge": [("流浪狗", 8, 1)],
+        "mountain_pass": [("岩羊", 15, 3), ("山魈", 18, 4)],
+    }
+    beasts = beasts_by_loc.get(origin, [("野兽", 10, 2)])
+    beast_name, beast_hp, beast_atk = rng.choice(beasts)
+
+    # 按等级选难度：1-2 级 normal，3-5 级 hard，6+ heroic
+    lv = int(player.level)
+    if lv <= 2:
+        combat_diff = "normal"
+    elif lv <= 5:
+        combat_diff = "hard"
+    else:
+        combat_diff = "heroic"
+    combat_check = player_sys.roll_check(player, "strength", combat_diff, rng)
+    result["check"] = combat_check
+    result["combat"] = {
+        "enemy": beast_name,
+        "enemy_hp": beast_hp,
+        "enemy_attack": beast_atk,
+        "result": combat_check["result"],
+    }
+
+    beast_damage = max(1, beast_atk + rng.randint(-1, 2))
+    hp_before = player.hp
+
+    if combat_check["result"] == "critical":
+        name, kind = rng.choice(pool)
+        result["found_item"] = _make_item(name, kind, "在%s搏斗中猎得。" % location_label(origin), rng)
+        result["exp_gain"] = 40
+        result["message"] = "你一拳打倒了%s，干净利落地解决了战斗。" % beast_name
+        result["summary"] = "你在%s徒手斗杀【%s】，猎得【%s】" % (
+            location_label(origin), beast_name, name)
+    elif combat_check["result"] == "success":
+        player.hp = max(1, player.hp - beast_damage // 2)
+        name, kind = rng.choice(pool)
+        result["found_item"] = _make_item(name, kind, "在%s搏斗中猎得。" % location_label(origin), rng)
+        result["exp_gain"] = 30
+        result["message"] = "你打退了%s，自己也擦破了皮。" % beast_name
+        result["summary"] = "你在%s与【%s】搏斗获胜" % (location_label(origin), beast_name)
+    elif combat_check["result"] == "partial":
+        player.hp = max(1, player.hp - beast_damage)
+        result["exp_gain"] = 15
+        result["message"] = "你和%s缠斗，受了不轻的伤，它跑了。" % beast_name
+        result["summary"] = "你在%s与【%s】缠斗，受伤但活了下来" % (
+            location_label(origin), beast_name)
+    else:
+        player.hp = max(1, player.hp - beast_damage * 2)
+        result["exp_gain"] = 5
+        result["message"] = "你被%s扑倒，勉强爬起逃回村口。" % beast_name
+        result["summary"] = "你在%s被【%s】重伤" % (location_label(origin), beast_name)
+        player.location_id = "village_square"
+
+    result["hp_before"] = hp_before
+    result["hp_after"] = player.hp
+    result["damage"] = hp_before - player.hp
+
+    # 濒死：强制回村并回复一半
+    if player.hp <= 1:
+        player.hp = max(1, player.max_hp // 2)
+        result["message"] += "（你昏睡了许久，醒来时已被人抬回了村里）"
+        player.location_id = "village_square"
+        result["hp_after"] = player.hp
+
+    player_sys.save_player(session, player)
+    player_sys.add_exp(session, result["exp_gain"])
     return result
 
 

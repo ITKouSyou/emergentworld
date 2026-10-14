@@ -40,6 +40,7 @@ class PlayerRow(SQLModel, table=True):
     reputation: int = 0
     hp: int = 100
     max_hp: int = 100
+    money: int = 0
     background: str = ""
     known_npcs_json: str = "[]"
     created: bool = False
@@ -142,6 +143,43 @@ class ChronicleRow(SQLModel, table=True):
     from_tick: int = 0
     to_tick: int = 0
     created_at: int = 0
+
+
+class GoalRow(SQLModel, table=True):
+    __tablename__ = "goal"
+    id: str = Field(primary_key=True)
+    kind: str = "daily"           # daily / milestone
+    key: str = ""                 # 唯一键
+    label: str = ""
+    target: int = 1
+    progress: int = 0
+    done: bool = False
+    claimed: bool = False
+    exp_reward: int = 0
+    money_reward: int = 0
+    created_day: int = 0
+    created_tick: int = 0
+
+
+class QuestRow(SQLModel, table=True):
+    __tablename__ = "quest"
+    id: str = Field(primary_key=True)
+    title: str = ""
+    description: str = ""
+    kind: str = "fetch"
+    giver_npc_id: str = ""
+    target_npc_id: str = ""
+    target_location_id: str = ""
+    state: str = "active"
+    progress: int = 0
+    progress_target: int = 1
+    reward_exp: int = 0
+    reward_money: int = 0
+    reward_item_id: str = ""
+    source_event_id: str = ""
+    created_tick: int = 0
+    deadline_tick: int = 0
+    completed_tick: int = 0
 
 
 class EvaluationRow(SQLModel, table=True):

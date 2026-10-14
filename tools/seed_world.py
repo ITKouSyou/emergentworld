@@ -19,6 +19,11 @@ MALE_NAMES = [
     "刘长河", "孙远", "周慎", "吴越", "郑屠",
     "冯舟", "褚守", "卫风", "蒋平", "沈墨",
 ]
+CHILD_NAMES = [
+    "小石头", "铁蛋", "栓子", "狗剩", "阿牛",
+    "丫丫", "招娣", "小翠", "阿香", "杏儿",
+]
+
 FEMALE_NAMES = [
     "李秀兰", "王桂花", "赵小梅", "陈阿娇", "刘翠",
     "孙玉", "周盼", "吴侬", "郑蓉", "冯素",
@@ -45,11 +50,32 @@ async def seed(n: int, seed_value: int) -> None:
         save_world(session, world)
         picks = pick_name_pool(n, rng)
         npcs = []
-        for name, gender in picks:
+
+        # 成年人（约 70%）
+        n_adults = max(4, int(n * 0.7))
+        adult_picks = picks[:n_adults]
+        # 儿童（约 30%）
+        n_children = n - n_adults
+
+        for name, gender in adult_picks:
             npc = await generate_npc(name, context="一个偏远村庄", gender=gender)
             save_npc(session, npc)
             npcs.append(npc)
-            print("created npc %s %s (%s)" % (npc.id, npc.name, npc.gender))
+            print("created adult %s %s (%s, age=%d)" % (
+                npc.id, npc.name, npc.gender, npc.age))
+
+        # 儿童：从 CHILD_NAMES 取
+        child_pool = list(CHILD_NAMES)
+        rng.shuffle(child_pool)
+        for i in range(min(n_children, len(child_pool))):
+            cname = child_pool[i]
+            cgender = "male" if i % 2 == 0 else "female"
+            npc = await generate_npc(cname, context="村里的孩子", gender=cgender)
+            # 强制年龄段
+            npc.age = rng.randint(7, 15)
+            save_npc(session, npc)
+            npcs.append(npc)
+            print("created child %s %s (age=%d)" % (npc.id, npc.name, npc.age))
 
         build_families(session, npcs, rng)
         print("built families")

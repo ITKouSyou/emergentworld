@@ -43,6 +43,7 @@ def load_player(session: Session) -> Optional[Player]:
         reputation=row.reputation,
         hp=row.hp,
         max_hp=row.max_hp,
+        money=row.money or 0,
         background=row.background or "",
         known_npcs=loads(row.known_npcs_json) or [],
         created=row.created,
@@ -103,6 +104,7 @@ def create_player(
         reputation=0,
         hp=100,
         max_hp=100,
+        money=20,
         background=background,
         known_npcs=[],
         created=True,
@@ -176,6 +178,59 @@ DIFFICULTY = {
     "hard": 18,
     "heroic": 22,
 }
+
+
+NATURAL_CAP = 15  # 自然成长上限
+
+GROWTH_CHANCE = {
+    "critical": 0.30,
+    "success": 0.15,
+    "partial": 0.05,
+    "failure": 0.0,
+}
+
+
+def try_natural_growth(
+    session,
+    player,
+    attribute: str,
+    check_result: str,
+    rng,
+) -> bool:
+    """行动后有概率自然成长属性。返回是否真的涨了。"""
+    if check_result not in GROWTH_CHANCE:
+        return False
+
+    cur = int(player.attributes.get(attribute, 5))
+    if cur >= NATURAL_CAP:
+        return False
+
+    # 属性越高，概率越低（15 时概率只剩 30%）
+    base_chance = GROWTH_CHANCE[check_result]
+    scale = max(0.3, 1.0 - (cur - 5) * 0.07)
+    chance = base_chance * scale
+
+    if rng.random() >= chance:
+        return False
+
+    # 直接改 PlayerRow
+    from server.models.db import PlayerRow, dumps
+    pr = session.get(PlayerRow, "player")
+    if pr is None:
+        return False
+
+    import json
+    attrs = json.loads(pr.attributes_json or "{}")
+    attrs[attribute] = cur + 1
+    pr.attributes_json = json.dumps(attrs, ensure_ascii=False)
+    session.add(pr)
+    session.commit()
+
+    # 同步内存对象
+    player.attributes[attribute] = cur + 1
+    print("[growth] %s %d → %d（%s 后）" % (
+        attribute, cur, cur + 1, check_result))
+    return True
 
 
 def roll_check(

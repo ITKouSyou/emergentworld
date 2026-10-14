@@ -43,6 +43,7 @@ class Player(BaseModel):
     reputation: int = 0
     hp: int = 100
     max_hp: int = 100
+    money: int = 0
     background: str = ""
     known_npcs: list[str] = Field(default_factory=list)
     created: bool = False

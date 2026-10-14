@@ -52,6 +52,38 @@ signal travel_done(data: Dictionary)
 func travel(location_id: String) -> void:
 	_request("POST", "/travel", {"location_id": location_id}, "travel_done")
 
+signal market_received(data: Dictionary)
+signal trade_done(data: Dictionary)
+
+func fetch_market() -> void:
+	_request("GET", "/market", {}, "market_received")
+
+func trade_sell(item_id: String) -> void:
+	_request("POST", "/trade/sell", {"item_id": item_id}, "trade_done")
+
+func trade_buy(name: String, kind: String, price: int, base_value: float) -> void:
+	_request("POST", "/trade/buy",
+		{"name": name, "kind": kind, "price": price, "base_value": base_value},
+		"trade_done")
+
+signal goals_received(data: Dictionary)
+signal goal_claimed(data: Dictionary)
+
+func fetch_goals() -> void:
+	_request("GET", "/goal", {}, "goals_received")
+
+func claim_goal(goal_id: String) -> void:
+	_request("POST", "/goal/claim", {"goal_id": goal_id}, "goal_claimed")
+
+signal quest_list_received(data: Array)
+signal quest_abandoned(data: Dictionary)
+
+func fetch_quests() -> void:
+	_request("GET", "/quest", {}, "quest_list_received")
+
+func abandon_quest(quest_id: String) -> void:
+	_request("POST", "/quest/abandon", {"quest_id": quest_id}, "quest_abandoned")
+
 func fetch_world_state() -> void: _request("GET", "/world/state", {}, "world_state_received")
 func step_world() -> void: _request("POST", "/world/step", {}, "event_triggered")
 func trigger_event() -> void: _request("POST", "/event/trigger", {}, "event_triggered")
@@ -82,12 +114,14 @@ func use_item(item_id: String, target_npc_id: String) -> void:
 	_item_request("POST", "/item/%s/use" % item_id, {"target_npc_id": target_npc_id}, "use")
 
 func resolve_event(event_id: String, choice_id: String) -> void:
-	_request("POST", "/event/%s/resolve" % event_id, {"choice_id": choice_id}, "event_resolved")
+	var body := {"choice_id": choice_id}
+	print("[api] resolve body=%s" % JSON.stringify(body))
+	_request("POST", "/event/%s/resolve" % event_id, body, "event_resolved")
 
 
 func _item_request(method: String, path: String, body: Dictionary, action_name: String) -> void:
 	var http := HTTPRequest.new()
-	http.timeout = 180.0
+	http.timeout = 60.0
 	add_child(http)
 	http.request_completed.connect(_on_item_response.bind(http, action_name))
 	var url := BASE_URL + path
@@ -123,8 +157,9 @@ func _on_item_response(
 
 
 func _request(method: String, path: String, body: Dictionary, signal_name: String) -> void:
+	print("[api] → %s %s" % [method, path])
 	var http := HTTPRequest.new()
-	http.timeout = 180.0
+	http.timeout = 60.0
 	add_child(http)
 	http.request_completed.connect(_on_response.bind(http, signal_name))
 	var url := BASE_URL + path
@@ -147,7 +182,9 @@ func _on_response(
 	_headers: PackedStringArray, body: PackedByteArray,
 	http: HTTPRequest, signal_name: String
 ) -> void:
-	http.queue_free()
+	if http != null and is_instance_valid(http):
+		http.queue_free()
+	print("[api] ← %s code=%d result=%d" % [signal_name, response_code, result])
 	if result != HTTPRequest.RESULT_SUCCESS:
 		request_failed.emit(signal_name, "transport error: %d" % result)
 		return
@@ -163,3 +200,8 @@ func _on_response(
 		request_failed.emit(signal_name, "JSON parse failed")
 		return
 	emit_signal(signal_name, data)
+
+
+func _cleanup_http() -> void:
+	# 空操作：之前的版本会误删正在请求的 HTTPRequest
+	pass

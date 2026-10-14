@@ -21,6 +21,12 @@
 语气建议：
   {relationship_hint}
 
+你最近经历的事：
+{recent_events}
+
+你身上未了的事（如果玩家问起，可以提起）：
+{active_quests}
+
 你记得的事：
 {memories}
 

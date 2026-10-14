@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 from pathlib import Path
@@ -44,7 +45,56 @@ class LLMClient:
 
     # ---------- 调用 ----------
 
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=10))
+    async def _call_raw(self, prompt: str, schema_json: dict | None = None) -> str:
+        """调用 LLM。使用 openai client 自带 timeout，避免 tenacity+asyncio 死锁。"""
+        import time as _time
+        t0 = _time.time()
+        print("[llm] 开始调用 len=%d" % len(prompt))
+        try:
+            resp = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a game content generator. "
+                            "Always answer with valid JSON. "
+                            "No prose, no markdown fences."
+                        ),
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                response_format={"type": "json_object"},
+                temperature=0.9,
+                timeout=30.0,
+            )
+            content = resp.choices[0].message.content or "{}"
+            print("[llm] 完成 %.1fs len=%d" % (_time.time() - t0, len(content)))
+            return content
+        except Exception as e:
+            print("[llm] 失败 %.1fs: %s: %s" % (
+                _time.time() - t0, type(e).__name__, str(e)[:120]))
+            raise
+
+    async def text(self, prompt: str) -> str:
+        """纯文本调用。"""
+        import time as _time
+        t0 = _time.time()
+        print("[llm.text] 开始 len=%d" % len(prompt))
+        try:
+            resp = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.8,
+                timeout=30.0,
+            )
+            content = resp.choices[0].message.content or ""
+            print("[llm.text] 完成 %.1fs" % (_time.time() - t0))
+            return content
+        except Exception as e:
+            print("[llm.text] 失败 %.1fs: %s" % (_time.time() - t0, type(e).__name__))
+            raise
+
     async def _call_raw(self, prompt: str) -> str:
         resp = await self.client.chat.completions.create(
             model=self.model,
@@ -106,7 +156,7 @@ class LLMClient:
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.8,
             ),
-            timeout=40.0,
+            timeout=25.0,
         )
         return resp.choices[0].message.content or ""
 
