@@ -126,6 +126,97 @@ func fetch_npc_active_quests(npc_id: String) -> void:
 func turn_in_quest(quest_id: String) -> void:
 	_request("POST", "/quest/%s/turn_in" % quest_id, {}, "quest_turned_in")
 
+signal save_list_received(data: Array)
+signal save_action_done(action: String, data: Dictionary)
+
+func fetch_saves() -> void:
+	_request("GET", "/save/list", {}, "save_list_received")
+
+func create_save(name: String) -> void:
+	_save_request("POST", "/save/create", {"name": name}, "create")
+
+func load_save(name: String) -> void:
+	_save_request("POST", "/save/load", {"name": name}, "load")
+
+func delete_save(name: String) -> void:
+	_save_request("POST", "/save/delete", {"name": name}, "delete")
+
+func _save_request(method: String, path: String, body: Dictionary, action_name: String) -> void:
+	var http := HTTPRequest.new()
+	http.timeout = 30.0
+	add_child(http)
+	http.request_completed.connect(_on_save_response.bind(http, action_name))
+
+	var url := BASE_URL + path
+	var headers := PackedStringArray(["Content-Type: application/json"])
+	var err: int
+	if method == "GET":
+		err = http.request(url, headers, HTTPClient.METHOD_GET)
+	else:
+		err = http.request(url, headers, HTTPClient.METHOD_POST, JSON.stringify(body))
+
+	if err != OK:
+		http.queue_free()
+		request_failed.emit(action_name, "request failed: %d" % err)
+
+
+func _on_save_response(
+	result: int, response_code: int,
+	_headers: PackedStringArray, body: PackedByteArray,
+	http: HTTPRequest, action_name: String
+) -> void:
+	http.queue_free()
+	if result != HTTPRequest.RESULT_SUCCESS:
+		request_failed.emit(action_name, "transport error: %d" % result)
+		return
+	var text := body.get_string_from_utf8()
+	var data: Variant = JSON.parse_string(text)
+	if response_code < 200 or response_code >= 300:
+		var msg := "HTTP %d" % response_code
+		if data is Dictionary and data.has("detail"):
+			msg += ": " + str(data["detail"])
+		request_failed.emit(action_name, msg)
+		return
+	save_action_done.emit(action_name, data if data is Dictionary else {})
+
+
+signal image_loaded(url: String, texture: ImageTexture)
+
+var _image_cache: Dictionary = {}
+
+func fetch_image(url: String) -> void:
+	if _image_cache.has(url):
+		emit_signal("image_loaded", url, _image_cache[url])
+		return
+
+	var full_url := BASE_URL + url
+	var http := HTTPRequest.new()
+	http.timeout = 30.0
+	add_child(http)
+	http.request_completed.connect(_on_image_response.bind(http, url, full_url))
+
+	var err: int = http.request(full_url, PackedStringArray(), HTTPClient.METHOD_GET)
+	if err != OK:
+		http.queue_free()
+
+
+func _on_image_response(
+	result: int, response_code: int,
+	_headers: PackedStringArray, body: PackedByteArray,
+	http: HTTPRequest, cache_key: String, full_url: String
+) -> void:
+	http.queue_free()
+	if result != HTTPRequest.RESULT_SUCCESS or response_code != 200:
+		return
+
+	var img := Image.new()
+	var err := img.load_png_from_buffer(body)
+	if err != OK:
+		return
+	var tex := ImageTexture.create_from_image(img)
+	_image_cache[cache_key] = tex
+	emit_signal("image_loaded", cache_key, tex)
+
 func fetch_world_state() -> void: _request("GET", "/world/state", {}, "world_state_received")
 func step_world() -> void: _request("POST", "/world/step", {}, "event_triggered")
 func trigger_event() -> void: _request("POST", "/event/trigger", {}, "event_triggered")

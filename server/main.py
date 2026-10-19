@@ -3,11 +3,76 @@
 from __future__ import annotations
 
 import asyncio
+import zlib
+import struct
+import random
 import uuid as _uuid
 import random
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Body
+import asyncio
+import random
+
+INIT_STATE = {
+    "status": "idle", # idle, generating, done
+    "current": 0,
+    "total": 14,
+    "message": "正在准备..."
+}
+
+async def _background_init():
+    """后台生成村民，不阻塞服务器启动"""
+    from server.generators.npc import generate_npc
+    from server.core.world import save_npc, load_world
+    from server.systems.family import build_families
+    from server.systems.schedule import generate_schedule
+    from server.systems.faction import assign_all_factions
+    from server.db.session import engine
+    from sqlmodel import Session
+    
+    INIT_STATE["status"] = "generating"
+    MALE_NAMES = ["张铁柱", "李大山", "王二狗", "赵石", "陈望", "刘长河", "孙远", "周慎"]
+    FEMALE_NAMES = ["李秀兰", "王桂花", "赵小梅", "陈阿娇", "刘翠", "孙玉"]
+    
+    npcs = []
+    total = len(MALE_NAMES) + len(FEMALE_NAMES)
+    INIT_STATE["total"] = total
+    
+    # 生成男的
+    for i, name in enumerate(MALE_NAMES):
+        INIT_STATE["message"] = f"正在生成村民：{name}..."
+        npc = await generate_npc(name, context="一个偏远村庄", gender="male")
+        with Session(engine) as session:
+            save_npc(session, npc)
+            _generate_local_avatar(npc.id, npc.name)
+        npcs.append(npc)
+        INIT_STATE["current"] += 1
+        
+    # 生成女的
+    for i, name in enumerate(FEMALE_NAMES):
+        INIT_STATE["message"] = f"正在生成村民：{name}..."
+        npc = await generate_npc(name, context="一个偏远村庄", gender="female")
+        with Session(engine) as session:
+            save_npc(session, npc)
+            _generate_local_avatar(npc.id, npc.name)
+        npcs.append(npc)
+        INIT_STATE["current"] += 1
+        
+    INIT_STATE["message"] = "正在建立家庭与派系关系..."
+    with Session(engine) as session:
+        rng = random.Random(42)
+        build_families(session, npcs, rng)
+        for npc in npcs:
+            npc.schedule = generate_schedule(npc, rng)
+            save_npc(session, npc)
+        assign_all_factions(session)
+        
+    INIT_STATE["status"] = "done"
+    INIT_STATE["message"] = "世界生成完毕！"
+
+
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlmodel import Session, SQLModel, select
 
@@ -31,6 +96,60 @@ from server.systems.embedding import get_embedding, serialize
 from server.systems.social import maybe_social_dialogue
 
 
+def _generate_local_avatar(npc_id: str, name: str):
+    import zlib
+    import struct
+    import random
+    from pathlib import Path
+    
+    avatar_dir = Path("content/assets/avatars")
+    avatar_dir.mkdir(parents=True, exist_ok=True)
+    target = avatar_dir / f"{npc_id}.png"
+    if target.exists():
+        return
+        
+    # 生成一个 32x32 的像素小人头像
+    rng = random.Random(hash(name) & 0xFFFF)
+    
+    # 色板
+    bg_color = (rng.randint(20, 60), rng.randint(20, 60), rng.randint(20, 60))
+    skin_color = (rng.randint(220, 255), rng.randint(170, 220), rng.randint(130, 180))
+    hair_color = (rng.randint(20, 100), rng.randint(20, 100), rng.randint(20, 100))
+    shirt_color = (rng.randint(50, 200), rng.randint(50, 200), rng.randint(50, 200))
+    
+    size = 32
+    raw_data = b''
+    for y in range(size):
+        raw_data += b'\x00'  # filter type
+        for x in range(size):
+            # 背景
+            color = bg_color
+            
+            # 衣服 (下半部分)
+            if 20 <= y <= 31 and 6 <= x <= 25:
+                color = shirt_color
+            # 头 (圆形)
+            elif (x - 16)**2 + (y - 14)**2 < 64:
+                color = skin_color
+                # 头发 (上半部分)
+                if y < 12:
+                    color = hair_color
+            # 眼睛
+            elif 12 <= y <= 14 and (x == 11 or x == 21):
+                color = (0, 0, 0)
+                
+            raw_data += struct.pack('BBB', *color)
+
+    def chunk(tag, data):
+        return struct.pack('>I', len(data)) + tag + data + struct.pack('>I', zlib.crc32(tag + data) & 0xffffffff)
+
+    header = b'\x89PNG\r\n\x1a\n'
+    ihdr = chunk(b'IHDR', struct.pack('>IIBBBBB', size, size, 8, 2, 0, 0, 0))
+    idat = chunk(b'IDAT', zlib.compress(raw_data))
+    iend = chunk(b'IEND', b'')
+    
+    target.write_bytes(header + ihdr + idat + iend)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -38,10 +157,26 @@ async def lifespan(app: FastAPI):
     ensure_schema()
     with Session(engine) as session:
         load_world(session)
+        from sqlmodel import select
+        from server.models.db import NPCRow
+        npc_count = len(session.exec(select(NPCRow)).all())
+        
+    if npc_count == 0:
+        asyncio.create_task(_background_init())
+    else:
+        INIT_STATE["status"] = "done"
+        INIT_STATE["current"] = INIT_STATE["total"]
+        
     yield
 
 
 app = FastAPI(title="EmergentWorld", lifespan=lifespan)
+
+# 静态资源挂载
+from pathlib import Path as _Path
+_avatar_dir = _Path("content/assets/avatars")
+_avatar_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/avatars", StaticFiles(directory=str(_avatar_dir)), name="avatars")
 app.include_router(routes_dialogue.router)
 app.include_router(routes_review.router)
 
@@ -59,6 +194,11 @@ def root() -> dict:
         "embedding_enabled": settings.embedding_enabled,
     }
 
+
+
+@app.get("/init/status")
+def get_init_status():
+    return INIT_STATE
 
 @app.get("/health")
 def health() -> dict:
@@ -267,10 +407,12 @@ def _npc_to_display(npc: NPC, npc_names: dict[str, str] | None = None) -> dict:
         "siblings_ids": list(fam.siblings),
         "siblings_names": [names.get(s, s) for s in fam.siblings],
     }
+    avatar_url = "/avatars/%s.png" % npc.id
     return {
         "id": npc.id, "name": npc.name, "age": npc.age,
         "gender": npc.gender,
         "gender_label": i18n.gender_label(npc.gender),
+        "avatar_url": avatar_url,
         "location_id": npc.location_id,
         "location_label": i18n.location_label(npc.location_id),
         "goals": npc.goals,
@@ -1038,6 +1180,45 @@ def npc_active_quests(npc_id: str) -> list[dict]:
     with get_session() as s:
         from server.systems import quest as quest_sys
         return quest_sys.list_npc_active_quests(s, npc_id)
+
+
+# ---------- Save ----------
+
+@app.get("/save/list")
+def save_list() -> list[dict]:
+    from server.systems import save_manager
+    return save_manager.list_saves()
+
+
+@app.get("/save/current")
+def save_current() -> dict:
+    from server.systems import save_manager
+    return save_manager.current_save_info()
+
+
+class SaveReq(BaseModel):
+    name: str
+
+
+@app.post("/save/create")
+def save_create(req: SaveReq) -> dict:
+    from server.systems import save_manager
+    return save_manager.create_save(req.name)
+
+
+@app.post("/save/load")
+def save_load(req: SaveReq) -> dict:
+    from server.systems import save_manager
+    r = save_manager.load_save(req.name)
+    if not r.get("ok"):
+        raise HTTPException(400, r.get("error", "load failed"))
+    return r
+
+
+@app.post("/save/delete")
+def save_delete(req: SaveReq) -> dict:
+    from server.systems import save_manager
+    return save_manager.delete_save(req.name)
 
 
 @app.get("/event")

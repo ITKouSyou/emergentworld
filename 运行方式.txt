@@ -24,9 +24,27 @@ uvicorn server.main:app --reload
 
 # 老数据清空重来
 Remove-Item data\world.db
-python tools\seed_world.py --npc 5
 
-# 出现此类报错时：Unexpected identifier "api" in class body.
-Select-String -Path client\main.gd -Pattern "^api\." 
-# 如果输出不为空，就跑这个脚本清一下。
-python check_gd.py
+#生成14个npc
+python tools\seed_world.py --npc 14
+
+#生成npc头像
+python tools/generate_avatars.py
+
+
+# 一键打包后端 需先确保在 Godot 里导出的 Game.exe 放在了 client/Game.exe
+python build_game.py
+
+
+最后总结你的标准操作流：
+修改代码
+
+在 Godot 中导出最新的游戏到 client/Game.exe。
+
+在项目根目录运行：python build_game.py
+
+把 dist/EmergentWorldServer 打包成 zip，发给朋友。
+
+自己玩的话，直接在 dist/EmergentWorldServer 里双击 启动游戏.vbs。
+
+你的项目现在极其干净且专业，可以放心继续开发或者发给朋友了！

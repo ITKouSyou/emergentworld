@@ -12,15 +12,14 @@ var weather: String = "clear"
 
 var hovered_npc_id: String = ""
 var selected_npc_id: String = ""
-var player_pos: Variant = null
 
 signal npc_clicked(npc_id: String)
 signal location_clicked(location_id: String)
 
 const MARGIN := 20.0
 const NPC_DOT_RADIUS := 5.0
-const NPC_HOVER_RADIUS := 11.0
-const BG_SPRING := Color("#1f2a1f")
+const NPC_HOVER_RADIUS := 16.0
+const BG_SPRING := Color("#2a3a2a")
 const BG_SUMMER := Color("#243321")
 const BG_AUTUMN := Color("#33291f")
 const BG_WINTER := Color("#232b35")
@@ -31,18 +30,17 @@ const PATH_COLOR := Color(0.65, 0.55, 0.35, 0.55)
 const PATH_WIDTH := 2.0
 const MOVE_DURATION := 0.75
 
+var avatar_cache: Dictionary = {}
 var _npc_animations: Dictionary = {}
 var font: Font
 var font_size := 12
 var _weather_t: float = 0.0
-
 
 func _ready() -> void:
 	font = ThemeDB.fallback_font
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	mouse_exited.connect(_on_mouse_exited)
 	set_process(true)
-
 
 func set_data(data: Dictionary) -> void:
 	var new_npcs: Array = data.get("npcs", [])
@@ -55,14 +53,15 @@ func set_data(data: Dictionary) -> void:
 	world_day = int(data.get("day", 0))
 	season = str(data.get("season", "spring"))
 	weather = str(data.get("weather", "clear"))
-	player_pos = data.get("player", null)
 	queue_redraw()
 
+func set_avatar_cache(cache: Dictionary) -> void:
+	avatar_cache = cache
+	queue_redraw()
 
 func set_selected(npc_id: String) -> void:
 	selected_npc_id = npc_id
 	queue_redraw()
-
 
 func _sync_npc_animations(new_npcs: Array) -> void:
 	var next_anim: Dictionary = {}
@@ -94,7 +93,6 @@ func _sync_npc_animations(new_npcs: Array) -> void:
 			}
 	_npc_animations = next_anim
 
-
 func _process(delta: float) -> void:
 	_weather_t += delta
 	var needs_redraw := false
@@ -108,12 +106,10 @@ func _process(delta: float) -> void:
 		anim["current_x"] = lerp(float(anim["from_x"]), float(anim["to_x"]), e)
 		anim["current_y"] = lerp(float(anim["from_y"]), float(anim["to_y"]), e)
 		needs_redraw = true
-	# 天气动画始终重绘
 	if weather != "clear" and weather != "fog":
 		needs_redraw = true
 	if needs_redraw:
 		queue_redraw()
-
 
 func _gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion:
@@ -121,15 +117,12 @@ func _gui_input(event: InputEvent) -> void:
 	elif event is InputEventMouseButton:
 		if event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 			_update_hover(event.position)
-			# 先判 NPC
 			if hovered_npc_id != "":
 				npc_clicked.emit(hovered_npc_id)
 				return
-			# 再判地点
 			var loc_id := _location_at(event.position)
 			if loc_id != "":
 				location_clicked.emit(loc_id)
-
 
 func _location_at(mouse_pos: Vector2) -> String:
 	var rect := _canvas_rect()
@@ -148,11 +141,9 @@ func _location_at(mouse_pos: Vector2) -> String:
 			return str(loc.get("id", ""))
 	return ""
 
-
 func _on_mouse_exited() -> void:
 	hovered_npc_id = ""
 	queue_redraw()
-
 
 func _update_hover(mouse_pos: Vector2) -> void:
 	var canvas_rect := _canvas_rect()
@@ -171,16 +162,13 @@ func _update_hover(mouse_pos: Vector2) -> void:
 		hovered_npc_id = closest_id
 		queue_redraw()
 
-
 func _canvas_rect() -> Rect2:
 	var w := size.x - MARGIN * 2
 	var h := size.y - MARGIN * 2
 	return Rect2(MARGIN, MARGIN, w, h)
 
-
 func _norm_to_screen(nx: float, ny: float, rect: Rect2) -> Vector2:
 	return Vector2(rect.position.x + nx * rect.size.x, rect.position.y + ny * rect.size.y)
-
 
 func _npc_screen_pos(npc_id: String, rect: Rect2) -> Vector2:
 	if _npc_animations.has(npc_id):
@@ -190,7 +178,6 @@ func _npc_screen_pos(npc_id: String, rect: Rect2) -> Vector2:
 		if str(npc.get("id", "")) == npc_id:
 			return _norm_to_screen(float(npc.get("x", 0.5)), float(npc.get("y", 0.5)), rect)
 	return Vector2.ZERO
-
 
 func _ambient_overlay() -> Color:
 	var h := world_hour
@@ -205,7 +192,6 @@ func _ambient_overlay() -> Color:
 	else:
 		return Color(0.08, 0.12, 0.32, 0.55)
 
-
 func _bg_color() -> Color:
 	var base := BG_SPRING
 	if season == "summer":
@@ -217,12 +203,10 @@ func _bg_color() -> Color:
 	var overlay := _ambient_overlay()
 	return base.lerp(BG_NIGHT, overlay.a * 1.4)
 
-
 func _draw() -> void:
 	var rect := _canvas_rect()
 	draw_rect(rect, _bg_color(), true)
 
-	# 网格
 	var grid_step := rect.size.x / 10.0
 	var x := rect.position.x
 	while x <= rect.position.x + rect.size.x:
@@ -233,7 +217,6 @@ func _draw() -> void:
 		draw_line(Vector2(rect.position.x, y), Vector2(rect.position.x + rect.size.x, y), GRID_COLOR, 1.0)
 		y += grid_step
 
-	# 道路
 	for p in paths:
 		if not p is Dictionary:
 			continue
@@ -242,7 +225,6 @@ func _draw() -> void:
 		draw_line(a, b, Color(PATH_COLOR.r, PATH_COLOR.g, PATH_COLOR.b, 0.15), PATH_WIDTH + 3.0)
 		draw_line(a, b, PATH_COLOR, PATH_WIDTH)
 
-	# 地点
 	for loc in locations:
 		if not loc is Dictionary:
 			continue
@@ -255,7 +237,6 @@ func _draw() -> void:
 		draw_circle(center, px_radius, Color(base_color.r, base_color.g, base_color.b, 0.22))
 		draw_arc(center, px_radius, 0.0, TAU, 48, base_color, 1.6, true)
 
-	# 活跃事件
 	for ev in active_events:
 		if not ev is Dictionary:
 			continue
@@ -267,7 +248,7 @@ func _draw() -> void:
 				draw_arc(center, radius, 0.0, TAU, 64, Color(1.0, 0.8, 0.3, 0.75), 2.2, true)
 				break
 
-	# NPC
+	# --- NPC 绘制（带头像） ---
 	for npc in npcs:
 		if not npc is Dictionary:
 			continue
@@ -275,23 +256,38 @@ func _draw() -> void:
 		var p := _npc_screen_pos(npc_id, rect)
 		var fill_color := Color(0.9, 0.9, 0.98, 0.95)
 		var outline_color := Color(0.1, 0.1, 0.15, 1.0)
+
 		if npc_id == selected_npc_id:
 			fill_color = Color(1.0, 0.9, 0.3, 1.0)
 			outline_color = Color(0.5, 0.35, 0.0, 1.0)
-			draw_circle(p, NPC_DOT_RADIUS + 3.0, Color(1.0, 0.9, 0.3, 0.25))
+			draw_circle(p, NPC_DOT_RADIUS + 4.0, Color(1.0, 0.9, 0.3, 0.25))
 		elif npc_id == hovered_npc_id:
 			fill_color = Color(0.7, 1.0, 1.0, 1.0)
 			outline_color = Color(0.2, 0.5, 0.6, 1.0)
-		draw_circle(p, NPC_DOT_RADIUS, fill_color)
-		draw_arc(p, NPC_DOT_RADIUS, 0.0, TAU, 24, outline_color, 1.5, true)
 
-	# 玩家
-	_draw_player(rect)
+		var avatar_url: String = str(npc.get("avatar_url", ""))
+		var tex: Texture2D = null
+		if avatar_url != "" and avatar_cache.has(avatar_url):
+			tex = avatar_cache[avatar_url]
 
-	# 环境光
+		if tex != null:
+			var tex_size := 20.0
+			var r := Rect2(p - Vector2(tex_size/2, tex_size/2), Vector2(tex_size, tex_size))
+			# 绘制黑色描边底框
+			var bg_rect := Rect2(r.position - Vector2(2, 2), r.size + Vector2(4, 4))
+			draw_rect(bg_rect, Color(0.1, 0.1, 0.15, 1.0), true)
+			# 如果选中，画个发光外圈
+			if npc_id == selected_npc_id:
+				draw_rect(Rect2(bg_rect.position - Vector2(1, 1), bg_rect.size + Vector2(2, 2)), Color(1.0, 0.9, 0.3, 0.8), false, 1.5)
+			elif npc_id == hovered_npc_id:
+				draw_rect(Rect2(bg_rect.position - Vector2(1, 1), bg_rect.size + Vector2(2, 2)), Color(0.7, 1.0, 1.0, 0.8), false, 1.5)
+			draw_texture_rect(tex, r, false)
+		else:
+			draw_circle(p, NPC_DOT_RADIUS, fill_color)
+			draw_arc(p, NPC_DOT_RADIUS, 0.0, TAU, 24, outline_color, 1.5, true)
+
+	# 环境光叠加
 	draw_rect(rect, _ambient_overlay(), true)
-
-	# 天气层
 	_draw_weather(rect)
 
 	# 文字层
@@ -302,10 +298,8 @@ func _draw() -> void:
 		var px_radius := float(loc.get("radius", 0.05)) * rect.size.x
 		var label: String = str(loc.get("label", loc.get("id", "")))
 		var text_pos := Vector2(center.x - _text_width(label, font_size) / 2.0, center.y - px_radius - 6)
-		draw_string(font, text_pos + Vector2(1, 1), label,
-			HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, Color(0, 0, 0, 0.75))
-		draw_string(font, text_pos, label,
-			HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, Color(0.95, 0.95, 0.9))
+		draw_string(font, text_pos + Vector2(1, 1), label, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, Color(0, 0, 0, 0.75))
+		draw_string(font, text_pos, label, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, Color(0.95, 0.95, 0.9))
 
 	for npc in npcs:
 		if not npc is Dictionary:
@@ -318,17 +312,14 @@ func _draw() -> void:
 		var tw := _text_width(name, font_size)
 		var bg_rect := Rect2(p.x - tw / 2.0 - 5, p.y - NPC_DOT_RADIUS - 22, tw + 10, 17)
 		draw_rect(bg_rect, Color(0, 0, 0, 0.8), true)
-		draw_string(font, Vector2(bg_rect.position.x + 5, bg_rect.position.y + 13),
-			name, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, Color(1, 1, 1))
-
+		draw_string(font, Vector2(bg_rect.position.x + 5, bg_rect.position.y + 13), name, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, Color(1, 1, 1))
 
 func _draw_weather(rect: Rect2) -> void:
 	if weather == "clear":
 		return
 	if weather == "rain":
 		draw_rect(rect, Color(0.3, 0.4, 0.7, 0.18), true)
-		var count := 80
-		for i in range(count):
+		for i in range(80):
 			var seed_x := fmod(float(i) * 53.7, rect.size.x)
 			var seed_y := fmod(float(i) * 91.3 + _weather_t * 600.0, rect.size.y)
 			var px := rect.position.x + seed_x
@@ -338,22 +329,18 @@ func _draw_weather(rect: Rect2) -> void:
 		draw_rect(rect, Color(0.75, 0.75, 0.8, 0.35), true)
 	elif weather == "snow":
 		draw_rect(rect, Color(0.85, 0.9, 1.0, 0.12), true)
-		var count := 100
-		for i in range(count):
+		for i in range(100):
 			var px := rect.position.x + fmod(float(i) * 37.1 + sin(_weather_t + float(i)) * 15.0, rect.size.x)
 			var py := rect.position.y + fmod(float(i) * 73.9 + _weather_t * 40.0, rect.size.y)
 			draw_circle(Vector2(px, py), 1.8, Color(1, 1, 1, 0.75))
 	elif weather == "storm":
 		draw_rect(rect, Color(0.15, 0.2, 0.35, 0.30), true)
-		var count := 120
-		for i in range(count):
+		for i in range(120):
 			var px := rect.position.x + fmod(float(i) * 61.3, rect.size.x)
 			var py := rect.position.y + fmod(float(i) * 89.7 + _weather_t * 900.0, rect.size.y)
 			draw_line(Vector2(px, py), Vector2(px - 5.0, py + 16.0), Color(0.7, 0.8, 1.0, 0.6), 1.2)
-		# 闪电
 		if fmod(_weather_t, 4.0) < 0.12:
 			draw_rect(rect, Color(1, 1, 1, 0.35), true)
-
 
 func _parse_color(hex_str: String) -> Color:
 	var s := hex_str.strip_edges()
@@ -366,34 +353,5 @@ func _parse_color(hex_str: String) -> Color:
 		return Color(r / 255.0, g / 255.0, b / 255.0, 1.0)
 	return Color(0.5, 0.5, 0.5, 1.0)
 
-
 func _text_width(text: String, size_px: int) -> float:
 	return font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, size_px).x
-
-
-func _draw_player(rect: Rect2) -> void:
-	if player_pos == null or not player_pos is Dictionary:
-		return
-	var pdata: Dictionary = player_pos
-	var nx := float(pdata.get("x", 0.5))
-	var ny := float(pdata.get("y", 0.5))
-	var p := _norm_to_screen(nx, ny, rect)
-
-	# 外光晕
-	draw_circle(p, NPC_DOT_RADIUS + 6.0, Color(1.0, 0.95, 0.4, 0.25))
-	# 主体（金色）
-	draw_circle(p, NPC_DOT_RADIUS + 1.5, Color(1.0, 0.85, 0.2, 1.0))
-	# 边线
-	draw_arc(p, NPC_DOT_RADIUS + 1.5, 0.0, TAU, 24, Color(0.5, 0.35, 0.0, 1.0), 2.0, true)
-	# 内点
-	draw_circle(p, 2.0, Color(0.3, 0.2, 0.0, 1.0))
-
-	# 名字
-	var name: String = str(pdata.get("name", "你"))
-	if name == "":
-		name = "你"
-	var tw := _text_width(name, font_size)
-	var bg_rect := Rect2(p.x - tw / 2.0 - 5, p.y - NPC_DOT_RADIUS - 26, tw + 10, 17)
-	draw_rect(bg_rect, Color(0.2, 0.15, 0.0, 0.85), true)
-	draw_string(font, Vector2(bg_rect.position.x + 5, bg_rect.position.y + 13),
-		name, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, Color(1.0, 0.95, 0.5))

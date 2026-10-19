@@ -172,5 +172,20 @@ def get_llm() -> LLMClient:
 
 
 def load_prompt(name: str) -> str:
-    path = Path("server/prompts") / name
-    return path.read_text(encoding="utf-8")
+    import sys
+    # 判断是不是打包后的 exe 环境
+    if getattr(sys, 'frozen', False):
+        base_dir = Path(sys.executable).parent
+        # 尝试几个可能的位置（onedir 模式下数据可能在 _internal 里）
+        for try_path in [
+            base_dir / "server" / "prompts" / name,
+            base_dir / "_internal" / "server" / "prompts" / name,
+            base_dir / "prompts" / name
+        ]:
+            if try_path.exists():
+                return try_path.read_text(encoding="utf-8")
+        raise FileNotFoundError(f"Prompt not found: {name}")
+    else:
+        # 开发环境
+        path = Path("server/prompts") / name
+        return path.read_text(encoding="utf-8")

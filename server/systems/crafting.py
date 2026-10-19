@@ -57,6 +57,19 @@ def wear_item(session: Session, item_id: str, action: str, rng=None) -> dict:
 # 合成
 # ============================================================
 
+# 材料获取途径提示
+MATERIAL_SOURCES = {
+    "草药": "【森林】、【井边】、【深山老林】",
+    "药材": "【森林】、【温泉】、【盐碱地】",
+    "矿石": "【废弃矿洞】、【采石场】、【石林】",
+    "燃料": "【村庄边缘】、【住处】、【废弃矿洞】",
+    "布料": "【市场】购买",
+    "食材": "【农田】、【果园】、【小溪】",
+    "信物": "完成事件获得",
+    "古物": "【荒坟】、【古庙遗址】，或事件获得",
+    "材料": "各地采集或市场购买"
+}
+
 # 每个配方：(成品名, 成品 kind, 材料要求 {材料kind: 数量}, 成品 value)
 RECIPES = [
     {
@@ -139,7 +152,12 @@ def list_available_recipes(session: Session, player_id: str = "player") -> list[
             "desc": rec["desc"],
             "value": rec["value"],
             "materials": [
-                {"kind": k, "count": v, "have": counts.get(k, 0)}
+                {
+                    "kind": k, 
+                    "count": v, 
+                    "have": counts.get(k, 0),
+                    "source": MATERIAL_SOURCES.get(k, "未知地点")
+                }
                 for k, v in rec["materials"].items()
             ],
             "can_craft": can_craft,

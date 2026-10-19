@@ -82,6 +82,7 @@ def build_map_data(session: Session, world: World) -> dict:
                 "id": npc.id, "name": npc.name,
                 "location_id": loc_id,
                 "x": round(px, 4), "y": round(py, 4),
+                "avatar_url": "/avatars/%s.png" % npc.id,
             })
 
     rows = session.exec(

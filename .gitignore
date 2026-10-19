@@ -33,6 +33,15 @@ data/*.db-shm
 client/*.bak
 *.log
 
+# ---------- 构建与打包产物 ----------
+# PyInstaller 的打包产物
+build/
+dist/
+*.spec
+
+# Godot 导出的执行文件（如果你不想把导出的 Game.exe 提交到 Git，请保持注释）
+client/Game.*
+
 # ---------- Godot ----------
 client/.godot/
 client/*.import/
@@ -45,8 +54,19 @@ client/*.import/
 Thumbs.db
 desktop.ini
 
-# ---------- 脚手架临时文件（可选）----------
-# 如果你不想把这些临时修复脚本传到仓库，取消下面注释
-# scaffold_*.py
-# fix[0-9]*.py
-# patch[0-9]*.py
+# ---------- 临时修复/补丁脚本 ----------
+# 你的根目录下有大量自动修复脚本，忽略它们，避免污染仓库
+fix_*.py
+fix_*.ps1
+fix_*.txt
+patch_*.py
+scaffold_*.py
+scripts_history/*
+# 如果想保留空的 scripts_history 目录，可以取消下面这行的注释并新建一个 .gitkeep 文件
+# !scripts_history/.gitkeep
+
+# 其他临时文件
+*.tmp
+
+# ---------- 游戏存档数据 ----------
+data/
