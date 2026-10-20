@@ -22,11 +22,10 @@ async def generate_reward(event: Event, world: World) -> Reward:
     # item 类型：生成真正的物品实体
     item = await generate_item(event, world, value)
 
-    summary = str(event.payload.get("summary", "")).strip()
-    if summary:
-        description = "%s 的结局：%s" % (tpl_zh, summary[:40])
-    else:
-        description = "%s的奖励" % tpl_zh
+    # 直接用模板名生成干净的中文描述，不取可能包含英文ID的 summary
+    description = "经历【%s】后获得的奖励。" % tpl_zh
+    if event.payload.get("choice_label"):
+        description = "你选择了【%s】，%s" % (event.payload["choice_label"], description)
 
     return Reward(
         id="rwd_%s" % uuid.uuid4().hex[:8],

@@ -52,3 +52,10 @@ python build_game.py
 自己玩的话，直接在 dist/EmergentWorldServer 里双击 启动游戏.vbs。
 
 你的项目现在极其干净且专业，可以放心继续开发或者发给朋友了！
+
+
+# 生成模板
+python scripts\gen_templates.py
+
+# 机器人模拟跑72回合
+python scripts/simulate_bot.py 72

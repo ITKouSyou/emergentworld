@@ -189,3 +189,9 @@ def load_prompt(name: str) -> str:
         # 开发环境
         path = Path("server/prompts") / name
         return path.read_text(encoding="utf-8")
+
+
+def reset_llm() -> None:
+    """重置 LLM 单例，用于前端修改 API Key 后刷新客户端。"""
+    global _llm
+    _llm = None

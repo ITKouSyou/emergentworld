@@ -1,0 +1,19 @@
+id: cliff_investigation_02
+label: 悬崖谜影
+tags:
+- mystery
+- investigation
+cooldown: 10
+weight: 1.0
+conditions: []
+params:
+  participant_count: 2
+  location: cliff
+prompt: 在一座古老的悬崖上，两名探险者发现了一块神秘的石碑，上面刻有未解之谜。夜幕降临，一阵怪风吹过，石碑似乎在诉说着古老的秘密。他们必须揭开真相，却不知这背后隐藏着更为深不可测的危机。
+evaluator:
+  require:
+  - participant_a
+  - participant_b
+  - clue
+  max_reward: 0.2
+interactive: true

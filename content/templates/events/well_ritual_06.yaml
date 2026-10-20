@@ -1,0 +1,19 @@
+id: well_ritual_06
+label: 井畔奇缘
+tags:
+- romance
+- ritual
+cooldown: 10
+weight: 1.0
+conditions: []
+params:
+  participant_count: 2
+  location: well
+prompt: 月夜降临，井畔的古老仪式再次引发一场神秘邂逅。两颗跳动的心在暗流涌动的夜晚相遇，他们将如何面对这场命运的考验？是携手共舞，还是陷入无尽的迷惘？
+evaluator:
+  require:
+  - participant_a
+  - participant_b
+  - choice
+  max_reward: 0.2
+interactive: true

@@ -1,0 +1,19 @@
+id: trade_well_daily_01
+label: 井畔交易
+tags:
+- trade
+- daily
+cooldown: 10
+weight: 1.0
+conditions: []
+params:
+  participant_count: 2
+  location: well
+prompt: 在破晓前的井畔，两名旅者相遇，一位带着珍稀药草，另一位却握着神秘地图。一场关乎生死宝藏的交易在暗潮涌动，却不知暗流背后隐藏着怎样的陷阱。
+evaluator:
+  require:
+  - participant_a
+  - participant_b
+  - clue
+  max_reward: 0.2
+interactive: true

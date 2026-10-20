@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import random
+import uuid
 from typing import Optional
 
 from sqlmodel import Session, select
@@ -22,6 +23,7 @@ from sqlmodel import Session, select
 from server.core import director
 from server.core.choices import build_choices, get_choice_spec
 from server.core.evaluator import evaluate_event, evaluate_reward, log_evaluation
+from server.core.evaluator import EvalPipeline, EventLogicEvaluator
 from server.core.world import load_npcs, save_event, save_world
 from server.generators.base import get_llm, load_prompt
 from server.generators.event import fill_event
@@ -334,6 +336,8 @@ async def run_event_cycle(
         return None
 
     if not force and not director.should_trigger(world, rng):
+        # 打印为什么没触发，方便排查
+        print(f"[director] tick={world.tick} 未触发事件 (tension={world.director.tension:.2f}, last_tick={world.director.last_event_tick})")
         return None
 
     npcs = load_npcs(session)
@@ -364,11 +368,83 @@ async def run_event_cycle(
     _tmp_by_id = {n.id: n for n in npcs}
     pre_roles = _pick_roles(tpl, _tmp_participants, _tmp_by_id, rng)
 
-    event = await fill_event(
-        tpl, world, npcs, rng,
-        player=player,
-        event_roles=pre_roles,
+    # ==========================================
+    # 包装：带重试和兜底的 fill_event
+    # ==========================================
+    async def _gen_event_with_retry(ctx: dict, feedback: list) -> Event:
+        try:
+            return await fill_event(
+                tpl, world, npcs, rng,
+                player=player,
+                event_roles=pre_roles,
+            )
+        except Exception as e:
+            print(f"[event_flow] fill_event 抛出异常: {e}")
+            raise e
+
+    def _fallback_event(ctx: dict) -> Event:
+        from server.i18n import template_label
+        loc_id = "village_square"
+        if player is not None:
+            loc_id = player.location_id
+
+        is_interactive = bool(tpl.interactive)
+        tpl_name = template_label(tpl.id)
+        
+        fallback_payload = {
+            "summary": f"关于【{tpl_name}】的普通事件。",
+            "narrative": __import__("random").choice([
+                "这件事情在村里引起了小小的波澜，但并没有引起太大的注意。",
+                "风波悄然兴起，人们交头接耳，似乎在暗中酝酿着什么。",
+                "看似平静的表象下，似乎隐藏着不为人知的秘密。",
+                "现场留下了一些蛛丝马迹，但线索如同乱麻般难以理清。"
+            ]),
+            "as_message": not is_interactive,
+        }
+        
+        if is_interactive:
+            fallback_payload["choices"] = [
+                {"id": "help", "label": "伸出援手", "attribute": "charisma", "attribute_label": "魅力"},
+                {"id": "observe", "label": "静观其变", "attribute": "perception", "attribute_label": "感知"}
+            ]
+
+        return Event(
+
+            id=f"evt_fallback_{uuid.uuid4().hex[:8]}",
+            template_id=tpl.id,
+            participants=[n.id for n in rng.sample(npcs, min(2, len(npcs)))],
+            location_id=loc_id,
+            state="awaiting_player" if is_interactive else "active",
+            payload=fallback_payload,
+            created_at=world.tick,
+            resolved_at=None
+        )
+
+    from server.core.evaluator import EvalPipeline, EventLogicEvaluator
+
+    # 组装 Pipeline
+    pipeline = EvalPipeline(
+        evaluators=[EventLogicEvaluator()],
+        max_retry=2,
+        pass_score=0.65
     )
+    
+    context = {"tpl_id": tpl.id, "world_tick": world.tick}
+    
+    # 运行 Pipeline，获取 event
+    event, eval_results = await pipeline.run_async(
+        generate_fn=_gen_event_with_retry,
+        context=context,
+        fallback_fn=_fallback_event
+    )
+
+    # 记录评估结果
+    if not all(r.passed for r in eval_results):
+        print(f"[event-eval] {tpl.id} 触发兜底。原因: {[r.reasons for r in eval_results if r.reasons]}")
+
+    # ==========================================
+    # 后续流程恢复原样
+    # ==========================================
     event.payload["interactive"] = bool(tpl.interactive)
 
     npc_ids = {n.id for n in npcs}
@@ -399,7 +475,7 @@ async def run_event_cycle(
                               for k, v in pre_roles.items() if v in _tmp_by_id)
         print("[event] %s 具体角色：%s" % (tpl.id, role_desc))
 
-    # 相关性判定
+        # 相关性判定
     relevance_ok = False
     relevance_score = 0.0
     relevance_detail: dict = {}
@@ -407,6 +483,13 @@ async def run_event_cycle(
         relevance_ok, relevance_score, relevance_detail = check_relevance(
             session, event, tpl, world, player, npcs,
         )
+        # 【新增】：如果这是一个交互模板，但相关性不足，有 30% 概率强制卷入玩家
+        # 这能保证玩家在跑图时，偶尔会遇到“管闲事”的机会
+        import random as _r
+        if not relevance_ok and _r.random() < 1.0:
+            relevance_ok = True
+            relevance_score = 0.5
+            relevance_detail["forced_involvement"] = True
 
     event.payload["relevance_score"] = round(relevance_score, 3)
     event.payload["relevance_detail"] = relevance_detail
@@ -497,8 +580,13 @@ async def _generate_outcome_text(
         "partial": "此事勉强有了着落。",
         "failure": "你没能处理好此事。",
     }.get(check["result"], "")
-    return "%s——%s%s" % (
-        event.payload.get("summary", ""),
+    
+    # 不要直接拿 summary，用模板的 label，避免暴露英文 ID
+    from server.i18n import template_label
+    tpl_name = template_label(event.template_id)
+    
+    return "关于【%s】，你选择了%s。%s" % (
+        tpl_name,
         choice_label,
         result_zh,
     )

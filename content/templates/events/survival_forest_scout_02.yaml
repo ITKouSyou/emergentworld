@@ -1,0 +1,20 @@
+id: forest_scout_02
+label: 夜行异影
+tags:
+- survival
+- daily
+- forest
+cooldown: 10
+weight: 1.0
+conditions: []
+params:
+  participant_count: 2
+  location: deep_forest
+prompt: 月光下，两名猎人在【deep_forest】深处遭遇了一群神秘的生物。其中一人发现了一块古老的符文石，它似乎蕴含着古老的力量。然而，这力量并非全然友善，选择如何应对，将成为他们生死攸关的抉择。
+evaluator:
+  require:
+  - participant_a
+  - participant_b
+  - clue
+  max_reward: 0.2
+interactive: true

@@ -1,0 +1,19 @@
+id: brook_love_10
+label: 桥畔情缘
+tags:
+- celebration
+- romance
+cooldown: 10
+weight: 1.0
+conditions: []
+params:
+  participant_count: 2
+  location: brook
+prompt: 月光洒在静谧的桥上，两位旅人【participant_a】与【participant_b】在桥畔相遇。一场突如其来的风暴将他们困于桥上，命运之轮开始转动，是携手共度风雨，还是各自离去？
+evaluator:
+  require:
+  - participant_a
+  - participant_b
+  - clue
+  max_reward: 0.2
+interactive: true

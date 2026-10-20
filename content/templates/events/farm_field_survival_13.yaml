@@ -1,0 +1,19 @@
+id: farm_field_survival_13
+label: 荒野求生
+tags:
+- survival
+- social
+cooldown: 10
+weight: 1.0
+conditions: []
+params:
+  participant_count: 2
+  location: farm_field
+prompt: 在荒野求生中，两位农夫意外发现了一本古老的咒语书，却不知这背后隐藏着一场神秘的诅咒。他们必须合作破解咒语，否则整个农场将陷入无尽的黑暗。
+evaluator:
+  require:
+  - participant_a
+  - participant_b
+  - clue
+  max_reward: 0.2
+interactive: true

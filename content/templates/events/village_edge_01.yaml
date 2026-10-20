@@ -1,0 +1,19 @@
+id: village_edge_01
+label: 夜祭之谜
+tags:
+- conflict
+- ritual
+cooldown: 10
+weight: 1.0
+conditions: []
+params:
+  participant_count: 2
+  location: village_edge
+prompt: 在月黑风高的夜晚，村庄边缘的古老祭坛上，祭祀仪式突然中断，神秘的火焰在祭坛旁熊熊燃烧。两位参与者之一的巫师突然倒地，另一人面临抉择：是揭开这禁忌之秘，还是选择逃离以保全自己？
+evaluator:
+  require:
+  - participant_a
+  - participant_b
+  - clue
+  max_reward: 0.2
+interactive: true

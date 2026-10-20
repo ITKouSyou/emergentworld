@@ -1,0 +1,19 @@
+id: dye_works_mystery_14
+label: 染坊疑云
+tags:
+- plot
+- daily
+cooldown: 10
+weight: 1.0
+conditions: []
+params:
+  participant_count: 2
+  location: dye_works
+prompt: 染坊中突然传出诡异的歌声，两位工匠在深夜相遇，面对着染缸中的奇异图案，他们必须决定是继续探索还是立即离开，而歌声似乎在引导他们走向未知的命运。
+evaluator:
+  require:
+  - participant_a
+  - participant_b
+  - clue
+  max_reward: 0.2
+interactive: true

@@ -1,0 +1,19 @@
+id: river_mystery_01
+label: 弯道疑云
+tags:
+- survival
+- forest
+cooldown: 10
+weight: 1.0
+conditions: []
+params:
+  participant_count: 2
+  location: river_bend
+prompt: 在一处幽深的河弯，两名幸存者偶遇传说中的神秘水鬼。夜幕低垂，水声如泣，他们必须在恐惧与理智中做出选择，才能揭开这古老的谜团。
+evaluator:
+  require:
+  - participant_a
+  - participant_b
+  - clue
+  max_reward: 0.2
+interactive: true

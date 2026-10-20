@@ -1,0 +1,19 @@
+id: ancient_grave_conflict_12
+label: 墓影之谜
+tags:
+- conflict
+- mystery
+cooldown: 10
+weight: 1.0
+conditions: []
+params:
+  participant_count: 2
+  location: ancient_grave
+prompt: 在古老的墓碑群中，盗墓者【participant_a】与探险家【participant_b】不期而遇，一场关于墓穴深处隐藏的神秘宝物和古老诅咒的冲突悄然展开。究竟谁将揭开真相，谁又将在这片阴影中迷失方向？
+evaluator:
+  require:
+  - participant_a
+  - participant_b
+  - clue
+  max_reward: 0.2
+interactive: true

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import random
+import sys
 import re
 from functools import lru_cache
 from pathlib import Path
@@ -199,18 +200,30 @@ def rhythm_factor(world: World) -> float:
     return 1.0
 
 
-@lru_cache(maxsize=1)
-def _load_templates_cached(template_dir: str) -> tuple[EventTemplate, ...]:
+def load_templates(template_dir: str | None = None) -> list[EventTemplate]:
+    """动态加载模板。如果是打包环境，自动寻找 exe 同级目录。"""
+    if template_dir is None:
+        if getattr(sys, 'frozen', False):
+            base_dir = Path(sys.executable).parent
+        else:
+            base_dir = Path(".")
+        template_dir = str(base_dir / "content" / "templates" / "events")
+        
     tpls: list[EventTemplate] = []
-    for path in sorted(Path(template_dir).glob("*.yaml")):
-        data = yaml.safe_load(path.read_text(encoding="utf-8"))
-        if data:
-            tpls.append(EventTemplate(**data))
-    return tuple(tpls)
+    t_dir = Path(template_dir)
+    if not t_dir.exists():
+        print(f"[director] 严重警告：找不到模板目录 {t_dir.absolute()}")
+        return tpls
 
-
-def load_templates(template_dir: str = "content/templates/events") -> list[EventTemplate]:
-    return list(_load_templates_cached(str(template_dir)))
+    for path in sorted(t_dir.glob("*.yaml")):
+        try:
+            data = yaml.safe_load(path.read_text(encoding="utf-8"))
+            if data:
+                tpls.append(EventTemplate(**data))
+        except Exception as e:
+            print(f"[director] 加载模板失败 {path.name}: {e}")
+            
+    return tpls
 
 
 def cooldown_ok(tpl: EventTemplate, world: World) -> bool:

@@ -1,0 +1,19 @@
+id: well_conflict_09
+label: 井底阴谋
+tags:
+- conflict
+- political
+cooldown: 10
+weight: 1.0
+conditions: []
+params:
+  participant_count: 2
+  location: well
+prompt: 在深不见底的井底，两个部族的长者因水源争执不休，井底的神秘壁画似乎预示着一场古老预言的实现。
+evaluator:
+  require:
+  - participant_a
+  - participant_b
+  - clue
+  max_reward: 0.2
+interactive: true

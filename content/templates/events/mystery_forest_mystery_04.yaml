@@ -1,0 +1,20 @@
+id: forest_mystery_04
+label: 幽林谜影
+tags:
+- mystery
+- forest
+- daily
+cooldown: 10
+weight: 1.0
+conditions: []
+params:
+  participant_count: 2
+  location: old_shrine
+prompt: 在古老的祭坛深处，每日午夜时分，神秘的光芒若隐若现，两位勇士为追寻真相而踏入幽林，却不知等待他们的将是命运的抉择。
+evaluator:
+  require:
+  - participant_a
+  - participant_b
+  - clue
+  max_reward: 0.2
+interactive: true

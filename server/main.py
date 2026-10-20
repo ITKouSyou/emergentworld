@@ -1,18 +1,44 @@
 """FastAPI 入口。"""
-
 from __future__ import annotations
-
 import asyncio
+import random
+import random as _r
+import uuid
+import uuid as _uuid
 import zlib
 import struct
-import random
-import uuid as _uuid
-import random
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Body
-import asyncio
-import random
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+from pydantic import BaseModel
+from sqlmodel import SQLModel, Session, select, delete
+
+from server.config import settings
+from server import i18n
+from server.db.session import engine, ensure_schema
+from server.models.db import (
+    EventRow, ItemRow, MemoryRow, RewardRow, NPCRow, GoalRow,
+    dumps, loads
+)
+from server.models.schemas import (
+    Player, World, NPC, Event, EventTemplate, Reward,
+    ATTRIBUTE_META, DEFAULT_ATTRIBUTES
+)
+from server.core import director
+from server.core.tick import tick
+from server.core.event_flow import check_timeouts, resolve_event, run_event_cycle
+from server.core.map_view import build_map_data
+from server.core.world import load_world, save_world, save_npc, load_npcs, save_event
+from server.systems import player as player_sys
+from server.systems import inventory, item_use, relationship
+from server.systems.chronicle import generate_chronicle, list_chronicles
+from server.systems.social import maybe_social_dialogue
+from server.systems.embedding import get_embedding, serialize
+from server.api import routes_dialogue, routes_review
+
 
 INIT_STATE = {
     "status": "idle", # idle, generating, done
@@ -24,42 +50,43 @@ INIT_STATE = {
 async def _background_init():
     """后台生成村民，不阻塞服务器启动"""
     from server.generators.npc import generate_npc
-    from server.core.world import save_npc, load_world
     from server.systems.family import build_families
     from server.systems.schedule import generate_schedule
     from server.systems.faction import assign_all_factions
-    from server.db.session import engine
-    from sqlmodel import Session
     
     INIT_STATE["status"] = "generating"
     MALE_NAMES = ["张铁柱", "李大山", "王二狗", "赵石", "陈望", "刘长河", "孙远", "周慎"]
     FEMALE_NAMES = ["李秀兰", "王桂花", "赵小梅", "陈阿娇", "刘翠", "孙玉"]
     
-    npcs = []
     total = len(MALE_NAMES) + len(FEMALE_NAMES)
     INIT_STATE["total"] = total
+    INIT_STATE["current"] = 0
+    INIT_STATE["message"] = "正在唤醒沉睡的灵魂..."
     
-    # 生成男的
-    for i, name in enumerate(MALE_NAMES):
-        INIT_STATE["message"] = f"正在生成村民：{name}..."
-        npc = await generate_npc(name, context="一个偏远村庄", gender="male")
-        with Session(engine) as session:
+    async def _gen_one(name: str, gender: str):
+        npc = await generate_npc(name, context="一个偏远村庄", gender=gender)
+        INIT_STATE["current"] += 1
+        INIT_STATE["message"] = "正在唤醒灵魂... (%d/%d)" % (INIT_STATE["current"], total)
+        return npc
+
+    tasks = []
+    for name in MALE_NAMES:
+        tasks.append(_gen_one(name, "male"))
+    for name in FEMALE_NAMES:
+        tasks.append(_gen_one(name, "female"))
+        
+    # 并发执行
+    npcs = await asyncio.gather(*tasks)
+    
+    INIT_STATE["message"] = "正在雕刻岁月的痕迹..."
+    INIT_STATE["current"] = total - 1 # 退回一格，防止进度条死卡100%
+    with Session(engine) as session:
+        for npc in npcs:
             save_npc(session, npc)
             _generate_local_avatar(npc.id, npc.name)
-        npcs.append(npc)
-        INIT_STATE["current"] += 1
+        INIT_STATE["current"] = total
         
-    # 生成女的
-    for i, name in enumerate(FEMALE_NAMES):
-        INIT_STATE["message"] = f"正在生成村民：{name}..."
-        npc = await generate_npc(name, context="一个偏远村庄", gender="female")
-        with Session(engine) as session:
-            save_npc(session, npc)
-            _generate_local_avatar(npc.id, npc.name)
-        npcs.append(npc)
-        INIT_STATE["current"] += 1
-        
-    INIT_STATE["message"] = "正在建立家庭与派系关系..."
+    INIT_STATE["message"] = "正在编织人际羁绊..."
     with Session(engine) as session:
         rng = random.Random(42)
         build_families(session, npcs, rng)
@@ -72,28 +99,32 @@ async def _background_init():
     INIT_STATE["message"] = "世界生成完毕！"
 
 
-from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
-from sqlmodel import Session, SQLModel, select
-
-from server import i18n
-from server.api import routes_dialogue, routes_review
-from server.config import settings
-from server.core import director
-from server.core.event_flow import check_timeouts, resolve_event, run_event_cycle
-from server.core.map_view import build_map_data
-from server.core.tick import tick
-from server.core.world import load_npcs, load_world, save_event, save_world
-from server.db.session import engine, ensure_schema
-from server.models.db import EventRow, ItemRow, MemoryRow, RewardRow, dumps, loads
-from server.models.schemas import (
-    ATTRIBUTE_META, DEFAULT_ATTRIBUTES, Event, NPC, Player, Reward, World,
-)
-from server.systems import inventory, item_use, relationship
-from server.systems import player as player_sys
-from server.systems.chronicle import generate_chronicle, list_chronicles
-from server.systems.embedding import get_embedding, serialize
-from server.systems.social import maybe_social_dialogue
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    settings.db_path.parent.mkdir(parents=True, exist_ok=True)
+    SQLModel.metadata.create_all(engine)
+    ensure_schema()
+    
+    # 先加载基础数据，保证只要有库就能读
+    with Session(engine) as session:
+        load_world(session)
+        npc_count = len(session.exec(select(NPCRow)).all())
+        
+    # 判断如果没有 Key，中止启动并让前端弹窗
+    if not settings.llm_api_key or settings.llm_api_key.strip() == "":
+        INIT_STATE["status"] = "need_key"
+        INIT_STATE["message"] = "请配置大模型 API Key"
+        yield
+        return
+        
+    # 如果有 Key 且没有 NPC，启动后台生成
+    if npc_count == 0:
+        asyncio.create_task(_background_init())
+    else:
+        INIT_STATE["status"] = "done"
+        INIT_STATE["current"] = INIT_STATE["total"]
+        
+    yield
 
 
 def _generate_local_avatar(npc_id: str, name: str):
@@ -101,17 +132,21 @@ def _generate_local_avatar(npc_id: str, name: str):
     import struct
     import random
     from pathlib import Path
+    import sys
     
-    avatar_dir = Path("content/assets/avatars")
+    if getattr(sys, 'frozen', False):
+        base_dir = Path(sys.executable).parent
+    else:
+        base_dir = Path(".")
+        
+    avatar_dir = base_dir / "content" / "assets" / "avatars"
     avatar_dir.mkdir(parents=True, exist_ok=True)
     target = avatar_dir / f"{npc_id}.png"
     if target.exists():
         return
         
-    # 生成一个 32x32 的像素小人头像
     rng = random.Random(hash(name) & 0xFFFF)
     
-    # 色板
     bg_color = (rng.randint(20, 60), rng.randint(20, 60), rng.randint(20, 60))
     skin_color = (rng.randint(220, 255), rng.randint(170, 220), rng.randint(130, 180))
     hair_color = (rng.randint(20, 100), rng.randint(20, 100), rng.randint(20, 100))
@@ -120,24 +155,17 @@ def _generate_local_avatar(npc_id: str, name: str):
     size = 32
     raw_data = b''
     for y in range(size):
-        raw_data += b'\x00'  # filter type
+        raw_data += b'\x00'
         for x in range(size):
-            # 背景
             color = bg_color
-            
-            # 衣服 (下半部分)
             if 20 <= y <= 31 and 6 <= x <= 25:
                 color = shirt_color
-            # 头 (圆形)
             elif (x - 16)**2 + (y - 14)**2 < 64:
                 color = skin_color
-                # 头发 (上半部分)
                 if y < 12:
                     color = hair_color
-            # 眼睛
             elif 12 <= y <= 14 and (x == 11 or x == 21):
                 color = (0, 0, 0)
-                
             raw_data += struct.pack('BBB', *color)
 
     def chunk(tag, data):
@@ -149,52 +177,111 @@ def _generate_local_avatar(npc_id: str, name: str):
     iend = chunk(b'IEND', b'')
     
     target.write_bytes(header + ihdr + idat + iend)
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    settings.db_path.parent.mkdir(parents=True, exist_ok=True)
-    SQLModel.metadata.create_all(engine)
-    ensure_schema()
-    with Session(engine) as session:
-        load_world(session)
-        from sqlmodel import select
-        from server.models.db import NPCRow
-        npc_count = len(session.exec(select(NPCRow)).all())
-        
-    if npc_count == 0:
-        asyncio.create_task(_background_init())
-    else:
-        INIT_STATE["status"] = "done"
-        INIT_STATE["current"] = INIT_STATE["total"]
-        
-    yield
+    print(f"[avatar] Generated avatar for {npc_id}")
 
 
 app = FastAPI(title="EmergentWorld", lifespan=lifespan)
 
-# 静态资源挂载
-from pathlib import Path as _Path
-_avatar_dir = _Path("content/assets/avatars")
-_avatar_dir.mkdir(parents=True, exist_ok=True)
-app.mount("/avatars", StaticFiles(directory=str(_avatar_dir)), name="avatars")
 app.include_router(routes_dialogue.router)
 app.include_router(routes_review.router)
 
+
+_event_lock = asyncio.Lock()
 
 def get_session() -> Session:
     return Session(engine)
 
 
-@app.get("/")
-def root() -> dict:
-    return {
-        "name": "EmergentWorld",
-        "version": "1.1.0",
-        "docs": "/docs",
-        "embedding_enabled": settings.embedding_enabled,
-    }
+@app.get("/avatars/{filename}")
+def get_avatar(filename: str):
+    import sys
+    from pathlib import Path
+    
+    # 智能判断根目录
+    if getattr(sys, 'frozen', False):
+        base_dir = Path(sys.executable).parent
+    else:
+        base_dir = Path(__file__).parent.parent
+        
+    p = base_dir / "content" / "assets" / "avatars" / filename
+    if p.exists():
+        return FileResponse(p)
+    
+    # 兼容当前工作目录
+    p2 = Path("content/assets/avatars") / filename
+    if p2.exists():
+        return FileResponse(p2)
+        
+    raise HTTPException(404, "Avatar not found")
 
 
+
+class ApiKeyRequest(BaseModel):
+    api_key: str
+    base_url: str
+    model: str
+
+@app.post("/config/set_key")
+async def set_api_key(req: ApiKeyRequest) -> dict:
+    from pathlib import Path
+    import sys
+    from server.generators.base import reset_llm
+    
+    settings.llm_api_key = req.api_key
+    settings.llm_base_url = req.base_url
+    settings.llm_model = req.model
+    reset_llm()
+    
+    if getattr(sys, 'frozen', False):
+        env_path = Path(sys.executable).parent / ".env"
+    else:
+        env_path = Path(".env")
+        
+    try:
+        lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []
+        new_lines = []
+        keys_set = set()
+        for line in lines:
+            if line.startswith("LLM_API_KEY="):
+                new_lines.append("LLM_API_KEY=" + req.api_key)
+                keys_set.add("LLM_API_KEY")
+            elif line.startswith("LLM_BASE_URL="):
+                new_lines.append("LLM_BASE_URL=" + req.base_url)
+                keys_set.add("LLM_BASE_URL")
+            elif line.startswith("LLM_MODEL="):
+                new_lines.append("LLM_MODEL=" + req.model)
+                keys_set.add("LLM_MODEL")
+            else:
+                new_lines.append(line)
+                
+        if "LLM_API_KEY" not in keys_set:
+            new_lines.append("LLM_API_KEY=" + req.api_key)
+        if "LLM_BASE_URL" not in keys_set:
+            new_lines.append("LLM_BASE_URL=" + req.base_url)
+        if "LLM_MODEL" not in keys_set:
+            new_lines.append("LLM_MODEL=" + req.model)
+            
+        content = chr(10).join(new_lines)
+        env_path.write_text(content, encoding="utf-8")
+        
+        INIT_STATE["status"] = "generating"
+        INIT_STATE["message"] = "Saving config, generating world..."
+        
+        with Session(engine) as session:
+            npc_count = len(session.exec(select(NPCRow)).all())
+            
+        if npc_count == 0:
+            asyncio.create_task(_background_init())
+        else:
+            INIT_STATE["status"] = "done"
+            INIT_STATE["current"] = INIT_STATE["total"]
+            
+        return {"ok": True, "message": "Config saved, generating world"}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print("[config] save .env failed: " + str(e))
+        return {"ok": False, "error": str(e)}
 
 @app.get("/init/status")
 def get_init_status():
@@ -348,41 +435,41 @@ def world_tick() -> dict:
 
 @app.post("/world/step")
 async def world_step() -> dict:
-    with get_session() as s:
-        world = load_world(s)
-        tick(s, world)
-        await check_timeouts(s, world)
+    async with _event_lock:
+        with get_session() as s:
+            world = load_world(s)
+            tick(s, world)
+            await check_timeouts(s, world)
 
-        npcs = load_npcs(s)
-        rng = random.Random(world.seed * 1000003 + world.tick * 7)
-        social = await maybe_social_dialogue(s, world, npcs, rng)
+            npcs = load_npcs(s)
+            rng = random.Random(world.seed * 1000003 + world.tick * 7)
+            social = await maybe_social_dialogue(s, world, npcs, rng)
 
-        templates = director.load_templates()
-        try:
-            event = await asyncio.wait_for(
-                run_event_cycle(s, world, templates, force=False),
-                timeout=60.0,
-            )
-        except asyncio.TimeoutError:
-            print("[world_step] 事件生成超时（60s），跳过本次事件")
-            event = None
-        save_world(s, world)
+            templates = director.load_templates()
+            try:
+                event = await asyncio.wait_for(
+                    run_event_cycle(s, world, templates, force=False),
+                    timeout=60.0,
+                )
+            except asyncio.TimeoutError:
+                print("[world_step] 事件生成超时（60s），跳过本次事件")
+                event = None
+            save_world(s, world)
 
-        return {
-            "tick": world.tick, "day": world.day, "hour": world.hour,
-            "tension": world.director.tension,
-            "season": world.season,
-            "season_label": i18n.season_label(world.season),
-            "weather": world.weather,
-            "weather_label": i18n.weather_label(world.weather),
-            "event": event.id if event else None,
-            "event_summary": event.payload.get("summary") if event else None,
-            "event_template": event.template_id if event else None,
-            "template_label": i18n.template_label(event.template_id) if event else None,
-            "awaiting_player": event.state == "awaiting_player" if event else False,
-            "social_dialogue": social,
-        }
-
+            return {
+                "tick": world.tick, "day": world.day, "hour": world.hour,
+                "tension": world.director.tension,
+                "season": world.season,
+                "season_label": i18n.season_label(world.season),
+                "weather": world.weather,
+                "weather_label": i18n.weather_label(world.weather),
+                "event": event.id if event else None,
+                "event_summary": event.payload.get("summary") if event else None,
+                "event_template": event.template_id if event else None,
+                "template_label": i18n.template_label(event.template_id) if event else None,
+                "awaiting_player": event.state == "awaiting_player" if event else False,
+                "social_dialogue": social,
+            }
 
 def _impressions_for_npc(session, npc_id: str) -> list:
     try:
@@ -434,6 +521,20 @@ def list_npcs() -> list[dict]:
     with get_session() as s:
         npcs = load_npcs(s)
         names = {n.id: n.name for n in npcs}
+        
+        # 检查并补全缺失的头像
+        from pathlib import Path
+        avatar_dir = Path("content/assets/avatars")
+        avatar_dir.mkdir(parents=True, exist_ok=True)
+        
+        for n in npcs:
+            target = avatar_dir / f"{n.id}.png"
+            if not target.exists():
+                try:
+                    _generate_local_avatar(n.id, n.name)
+                except Exception as e:
+                    print(f"[avatar] 修复失败 {n.id}: {e}")
+
         return [_npc_to_display(n, names) for n in npcs]
 
 
@@ -617,7 +718,6 @@ async def explore_endpoint() -> dict:
         # 处理物品入库
         item_data = result.get("found_item")
         if item_data is not None:
-            from server.models.db import ItemRow
             row = ItemRow(
                 id=item_data["id"],
                 reward_id="",
@@ -654,119 +754,117 @@ class ActionRequest(BaseModel):
 async def action_endpoint(req: ActionRequest) -> dict:
     """执行一个玩家行动，同时推进世界 1 tick。"""
     from server.systems import actions as actions_sys
-    import uuid as _uuid
 
-    with get_session() as s:
-        world = load_world(s)
-        player = player_sys.load_player(s)
-        if player is None or not player.created:
-            raise HTTPException(400, "player not created")
+    async with _event_lock:
+        with get_session() as s:
+            world = load_world(s)
+            player = player_sys.load_player(s)
+            if player is None or not player.created:
+                raise HTTPException(400, "player not created")
 
-        # 1. 玩家行动
-        action_result = await actions_sys.do_action(s, world, player, req.action)
+            # 1. 玩家行动
+            action_result = await actions_sys.do_action(s, world, player, req.action)
 
-        # 2. 推进世界 1 tick
-        tick(s, world)
-        await check_timeouts(s, world)
+            # 2. 推进世界 1 tick
+            tick(s, world)
+            await check_timeouts(s, world)
 
-        # 3. NPC 闲谈
-        npcs = load_npcs(s)
-        rng = random.Random(world.seed * 1000003 + world.tick * 7)
-        social = await maybe_social_dialogue(s, world, npcs, rng)
+            # 3. NPC 闲谈
+            npcs = load_npcs(s)
+            rng = random.Random(world.seed * 1000003 + world.tick * 7)
+            social = await maybe_social_dialogue(s, world, npcs, rng)
 
-        # 4. 世界事件
-        templates = director.load_templates()
-        event = await run_event_cycle(s, world, templates, force=False)
+            # 4. 世界事件
+            templates = director.load_templates()
+            event = await run_event_cycle(s, world, templates, force=False)
 
-        # 5. 记录玩家行动到 event 表
-        try:
-            from server.models.schemas import Event as EventModel
-            evt_id = "evt_act_%s" % _uuid.uuid4().hex[:8]
-            evt = EventModel(
-                id=evt_id,
-                template_id=req.action,
-                participants=["player"],
-                location_id=action_result.get("target_id") or player.location_id,
-                state="resolved",
-                payload={
-                    "summary": action_result.get("summary", ""),
-                    "narrative": action_result.get("flavor", ""),
-                    "outcome": action_result.get("message", ""),
-                    "check": action_result.get("check") or {},
-                    "exp_gain": int(action_result.get("exp_gain", 0)),
-                    "interactive": False,
-                    "as_message": True,
-                    "is_player_action": True,
-                    "tpl_tags": ["action"],
-                },
-                created_at=world.tick,
-                resolved_at=world.tick,
-            )
-            save_event(s, evt)
-        except Exception as e:
-            print("[action] 事件记录失败：%s" % e)
+            # 5. 记录玩家行动到 event 表
+            try:
+                from server.models.schemas import Event as EventModel
+                evt_id = "evt_act_%s" % _uuid.uuid4().hex[:8]
+                evt = EventModel(
+                    id=evt_id,
+                    template_id=req.action,
+                    participants=["player"],
+                    location_id=action_result.get("target_id") or player.location_id,
+                    state="resolved",
+                    payload={
+                        "summary": action_result.get("summary", ""),
+                        "narrative": action_result.get("flavor", ""),
+                        "outcome": action_result.get("message", ""),
+                        "check": action_result.get("check") or {},
+                        "exp_gain": int(action_result.get("exp_gain", 0)),
+                        "interactive": False,
+                        "as_message": True,
+                        "is_player_action": True,
+                        "tpl_tags": ["action"],
+                    },
+                    created_at=world.tick,
+                    resolved_at=world.tick,
+                )
+                save_event(s, evt)
+            except Exception as e:
+                print("[action] 事件记录失败：%s" % e)
 
-        # 5.5 目标记录
-        try:
-            from server.systems import goal as goal_sys
-            goal_sys.ensure_daily_goals(s, world, random.Random(world.seed + world.day))
-            goal_sys.ensure_milestones(s, world)
+            # 5.5 目标记录
+            try:
+                from server.systems import goal as goal_sys
+                goal_sys.ensure_daily_goals(s, world, random.Random(world.seed + world.day))
+                goal_sys.ensure_milestones(s, world)
 
-            # 根据行动和结果映射
-            action_name = req.action
-            found_item = action_result.get("found_item") is not None
-            record_action = None
-            if action_name == "hunt" and found_item:
-                record_action = "hunt_success"
-            elif action_name == "gather":
-                record_action = "gather"
-            elif action_name == "train":
-                record_action = "train"
-            elif action_name == "socialize":
-                record_action = "socialize"
-            elif action_name == "explore":
-                record_action = "explore"
+                # 根据行动和结果映射
+                action_name = req.action
+                found_item = action_result.get("found_item") is not None
+                record_action = None
+                if action_name == "hunt" and found_item:
+                    record_action = "hunt_success"
+                elif action_name == "gather":
+                    record_action = "gather"
+                elif action_name == "train":
+                    record_action = "train"
+                elif action_name == "socialize":
+                    record_action = "socialize"
+                elif action_name == "explore":
+                    record_action = "explore"
 
-            if record_action:
-                goal_sys.record_action(s, world, player, record_action, 1)
-        except Exception as e:
-            import traceback
-            print("[action] 目标记录失败：%s" % e)
-            traceback.print_exc()
+                if record_action:
+                    goal_sys.record_action(s, world, player, record_action, 1)
+            except Exception as e:
+                import traceback
+                print("[action] 目标记录失败：%s" % e)
+                traceback.print_exc()
 
-        # 6. 物品入库
-        item_data = action_result.get("found_item")
-        if item_data is not None:
-            from server.models.db import ItemRow
-            row = ItemRow(
-                id=item_data["id"], reward_id="", event_id="",
-                name=item_data.get("name", ""),
-                kind=item_data.get("kind", ""),
-                affixes_json=dumps(item_data.get("affixes", [])),
-                story=item_data.get("story", ""),
-                value=float(item_data.get("value", 0.0)),
-                owner_id="player", consumed=False,
-            )
-            s.add(row)
-            s.commit()
+            # 6. 物品入库
+            item_data = action_result.get("found_item")
+            if item_data is not None:
+                row = ItemRow(
+                    id=item_data["id"], reward_id="", event_id="",
+                    name=item_data.get("name", ""),
+                    kind=item_data.get("kind", ""),
+                    affixes_json=dumps(item_data.get("affixes", [])),
+                    story=item_data.get("story", ""),
+                    value=float(item_data.get("value", 0.0)),
+                    owner_id="player", consumed=False,
+                )
+                s.add(row)
+                s.commit()
 
-        save_world(s, world)
+            save_world(s, world)
 
-        p2 = player_sys.load_player(s)
-        action_result["player"] = _player_to_response(s, p2) if p2 else {}
-        action_result["tick"] = world.tick
-        action_result["day"] = world.day
-        action_result["hour"] = world.hour
-        action_result["world_event"] = {
-            "id": event.id,
-            "summary": event.payload.get("summary"),
-            "template_label": i18n.template_label(event.template_id),
-            "awaiting_player": event.state == "awaiting_player",
-        } if event else None
-        action_result["social"] = social
+            p2 = player_sys.load_player(s)
+            action_result["player"] = _player_to_response(s, p2) if p2 else {}
+            action_result["tick"] = world.tick
+            action_result["day"] = world.day
+            action_result["hour"] = world.hour
+            action_result["world_event"] = {
+                "id": event.id,
+                "summary": event.payload.get("summary"),
+                "template_label": i18n.template_label(event.template_id),
+                "awaiting_player": event.state == "awaiting_player",
+            } if event else None
+            action_result["social"] = social
 
-        return action_result
-
+            return action_result
 
 class TravelRequest(BaseModel):
     location_id: str
@@ -775,7 +873,6 @@ class TravelRequest(BaseModel):
 @app.post("/travel")
 async def travel_endpoint(req: TravelRequest) -> dict:
     """玩家移动到已发现的地点，消耗 1 tick。"""
-    import uuid as _uuid
     from server.map_layout import LOCATION_LAYOUT
 
     with get_session() as s:
@@ -867,7 +964,6 @@ async def travel_endpoint(req: TravelRequest) -> dict:
 
 @app.get("/market")
 def market_view() -> dict:
-    import random as _r
     with get_session() as s:
         world = load_world(s)
         player = player_sys.load_player(s)
@@ -919,7 +1015,6 @@ def trade_sell(req: SellRequest) -> dict:
         # 记录目标
         try:
             from server.systems import goal as goal_sys
-            import random as _r
             goal_sys.ensure_daily_goals(s, world, _r.Random(world.seed + world.day))
             goal_sys.ensure_milestones(s, world)
             p2 = player_sys.load_player(s)
@@ -961,10 +1056,10 @@ def trade_buy(req: BuyRequest) -> dict:
 
 @app.get("/goal")
 def goal_list() -> dict:
+    import random as _r
     with get_session() as s:
         world = load_world(s)
         from server.systems import goal as goal_sys
-        import random as _r
         rng = _r.Random(world.seed + world.day)
         goal_sys.ensure_daily_goals(s, world, rng)
         goal_sys.ensure_milestones(s, world)
@@ -994,14 +1089,11 @@ def goal_claim(req: ClaimRequest) -> dict:
 @app.post("/goal/reset")
 def goal_reset() -> dict:
     """清空所有目标并重建（用于调试或老数据修复）。"""
-    from sqlmodel import delete
-    from server.models.db import GoalRow
     with get_session() as s:
         s.exec(delete(GoalRow))
         s.commit()
         world = load_world(s)
         from server.systems import goal as goal_sys
-        import random as _r
         rng = _r.Random(world.seed + world.day)
         goal_sys.ensure_daily_goals(s, world, rng)
         goal_sys.ensure_milestones(s, world)
@@ -1013,8 +1105,8 @@ def goal_reset() -> dict:
 @app.get("/quest")
 def quest_list(limit: int = 30) -> list[dict]:
     with get_session() as s:
-        from server.systems import quest as quest_sys
         from server.core.world import load_npcs as _load_npcs
+        from server.systems import quest as quest_sys
         npc_names = {n.id: n.name for n in _load_npcs(s)}
         rows = quest_sys.list_all(s, limit=limit)
         return [
@@ -1315,7 +1407,6 @@ async def resolve_event_endpoint(
         # 记录"参与事件"目标
         try:
             from server.systems import goal as goal_sys
-            import random as _r
             goal_sys.ensure_daily_goals(s, world, _r.Random(world.seed + world.day))
             goal_sys.ensure_milestones(s, world)
             player = player_sys.load_player(s)

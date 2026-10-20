@@ -1,0 +1,19 @@
+id: smithy_trade_conundrum_17
+label: 交易谜题
+tags:
+- survival
+- trade
+cooldown: 10
+weight: 1.0
+conditions: []
+params:
+  participant_count: 2
+  location: smithy
+prompt: 在一座破旧的锻造车间内，铁匠与商人围绕一匹神秘的铁块展开激烈争论。铁匠坚称这铁块蕴含神奇力量，而商人却怀疑其中藏有诅咒。谁的话才是真的？
+evaluator:
+  require:
+  - participant_a
+  - participant_b
+  - clue
+  max_reward: 0.2
+interactive: true

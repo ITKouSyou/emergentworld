@@ -12,9 +12,11 @@ from server.models.schemas import DEFAULT_ATTRIBUTES, Player
 
 PLAYER_ID = "player"
 
-# 升级所需经验公式：100 * level^1.5
+# 升级所需经验公式：线性增长，让前期爽快，后期平滑
 def exp_for_level(level: int) -> int:
-    return int(100 * (level ** 1.5))
+    if level == 1:
+        return 100
+    return 100 + (level - 1) * 150
 
 
 # 每级获得 2 个可分配点
@@ -176,10 +178,10 @@ def learn_about_npc(session: Session, npc_id: str) -> None:
 # ============================================================
 
 DIFFICULTY = {
-    "easy": 12,
-    "normal": 15,
-    "hard": 18,
-    "heroic": 22,
+    "easy": 9,     # 新手村随便采药
+    "normal": 13,  # 正常打猎
+    "hard": 17,    # 高级地区探索
+    "heroic": 21,  # 挑战巨龙/猛虎
 }
 
 

@@ -1,0 +1,19 @@
+id: farm_field_survival_11
+label: 农场惊魂
+tags:
+- survival
+- social
+cooldown: 10
+weight: 1.0
+conditions: []
+params:
+  participant_count: 2
+  location: farm_field
+prompt: 在农场深处，两个旅人意外发现了一本古老的咒语书。正当他们试图解读时，一道黑影从书中跃出，声称是诅咒的守护者。为了生存，他们必须选择合作或是各自为战。
+evaluator:
+  require:
+  - participant_a
+  - participant_b
+  - clue
+  max_reward: 0.2
+interactive: true

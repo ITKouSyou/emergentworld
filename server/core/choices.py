@@ -78,12 +78,23 @@ LABEL_OVERRIDES: dict[str, dict[str, str]] = {
 }
 
 
-def pick_attribute(tpl: EventTemplate, default: str) -> str:
-    """根据模板的 tags 选择最合适的属性。"""
+def pick_attribute(tpl: EventTemplate, base_attr: str, cid: str) -> str:
+    """根据不同的选项 ID，合理分配属性判定，避免全变成感知"""
+    if cid == "help":
+        for tag in ("social", "romance", "trade", "daily", "celebration", "political"):
+            if tag in tpl.tags: return TAG_TO_ATTRIBUTE[tag]
+    elif cid == "observe":
+        for tag in ("mystery", "investigation", "plot", "survival"):
+            if tag in tpl.tags: return TAG_TO_ATTRIBUTE[tag]
+    elif cid == "oppose":
+        for tag in ("combat", "conflict", "adventure"):
+            if tag in tpl.tags: return TAG_TO_ATTRIBUTE[tag]
+            
+    # 如果没匹配上特定的分类，就根据标签池兜底
     for tag in tpl.tags:
         if tag in TAG_TO_ATTRIBUTE:
             return TAG_TO_ATTRIBUTE[tag]
-    return default
+    return base_attr
 
 
 def build_choices(tpl: EventTemplate) -> list[dict]:
@@ -97,7 +108,7 @@ def build_choices(tpl: EventTemplate) -> list[dict]:
     result: list[dict] = []
     for cid in ("help", "observe", "oppose"):
         base = CHOICES[cid]
-        attr = pick_attribute(tpl, base["attribute"])
+        attr = pick_attribute(tpl, base["attribute"], cid)
         result.append({
             "id": cid,
             "label": override.get(cid, base["label"]),

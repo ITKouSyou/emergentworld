@@ -1,0 +1,19 @@
+id: mountain_pass_combat_20
+label: 险关疑云
+tags:
+- mystery
+- combat
+cooldown: 10
+weight: 1.0
+conditions: []
+params:
+  participant_count: 2
+  location: mountain_pass
+prompt: 在苍茫的群山之间，一座险峻的山谷隐藏着古老的秘密。两位英雄在此相遇，却不知一个神秘的陷阱正悄然启动。他们能否携手破解谜题，还是陷入战斗的漩涡？
+evaluator:
+  require:
+  - participant_a
+  - participant_b
+  - clue
+  max_reward: 0.2
+interactive: true

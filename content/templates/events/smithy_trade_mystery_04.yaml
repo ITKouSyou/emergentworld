@@ -1,0 +1,19 @@
+id: smithy_trade_mystery_04
+label: 铁匠疑云
+tags:
+- trade
+- mystery
+cooldown: 10
+weight: 1.0
+conditions: []
+params:
+  participant_count: 2
+  location: smithy
+prompt: 一位神秘的旅人在铁匠铺中交易着珍贵的矿石，却透露出一些不为人知的秘密。正当铁匠沉浸于矿石的神奇力量时，一个神秘的阴影悄然逼近，似乎预示着一场不可预知的冒险。
+evaluator:
+  require:
+  - participant_a
+  - participant_b
+  - clue
+  max_reward: 0.2
+interactive: true

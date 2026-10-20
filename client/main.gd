@@ -192,14 +192,21 @@ func _poll_init_status() -> void:
 			var total = float(data.get("total", 14))
 			var msg = str(data.get("message", "正在加载..."))
 			
-			overlay_label.text = msg
-			if total > 0:
+			if is_instance_valid(overlay_label):
+				overlay_label.text = msg
+			if is_instance_valid(overlay_progress) and total > 0:
 				overlay_progress.value = (cur / total) * 100.0
 			
+			if status == "need_key":
+				_is_polling = false
+				_show_api_key_dialog()
+				return
+
 			if status == "done":
-				# 初始化完成，移除遮罩并加载数据
-				loading_overlay.queue_free()
+				if is_instance_valid(loading_overlay):
+					if is_instance_valid(loading_overlay): loading_overlay.queue_free()
 				loading_overlay = null
+				_is_polling = false
 				api.fetch_i18n()
 				return
 		http.queue_free()
@@ -208,6 +215,102 @@ func _poll_init_status() -> void:
 		_poll_init_status()
 	)
 	http.request(url)
+
+
+func _show_api_key_dialog() -> void:
+	if loading_overlay == null:
+		return
+		
+	overlay_label.text = "首次运行需要配置大模型 API Key"
+	overlay_progress.visible = false
+	
+	if loading_overlay.find_child("ApiKeyUI", true, false):
+		return
+		
+	var center = loading_overlay.get_child(0)
+	if not (center is CenterContainer):
+		return
+	
+	var main_vbox = center.get_child(0)
+	if not (main_vbox is VBoxContainer):
+		return
+		
+	var vbox := VBoxContainer.new()
+	vbox.name = "ApiKeyUI"
+	vbox.add_theme_constant_override("separation", 12)
+	
+	var hint := RichTextLabel.new()
+	hint.bbcode_enabled = true
+	hint.selection_enabled = true
+	hint.fit_content = true
+	hint.custom_minimum_size = Vector2(350, 0)
+	hint.text = "请前往智谱开放平台注册并获取 API Key：
+[color=cyan][url]https://open.bigmodel.cn/[/url][/color]
+(glm-4-flash 模型目前是免费的)
+[color=gray](支持鼠标划选文字复制)[/color]"
+	hint.add_theme_color_override("default_color", Color(0.7, 0.7, 0.7))
+	vbox.add_child(hint)
+	
+	var copy_btn := Button.new()
+	copy_btn.text = "一键复制链接"
+	copy_btn.pressed.connect(func():
+		DisplayServer.clipboard_set("https://open.bigmodel.cn/")
+		copy_btn.text = "已复制到剪贴板!"
+	)
+	vbox.add_child(copy_btn)
+	
+	var key_input := LineEdit.new()
+	key_input.placeholder_text = "输入您的 API Key"
+	key_input.secret = true
+	key_input.custom_minimum_size = Vector2(300, 0)
+	vbox.add_child(key_input)
+	
+	var btn := Button.new()
+	btn.text = "保存并启动世界"
+	vbox.add_child(btn)
+	
+	main_vbox.add_child(vbox)
+	
+	btn.pressed.connect(func():
+		var key := key_input.text.strip_edges()
+		if key == "":
+			return
+		btn.disabled = true
+		btn.text = "正在保存..."
+		
+		var http := HTTPRequest.new()
+		add_child(http)
+		http.request_completed.connect(func(_r, _c, _h, body):
+			var res = JSON.parse_string(body.get_string_from_utf8())
+			if res is Dictionary and res.get("ok"):
+				if is_instance_valid(overlay_label):
+					overlay_label.text = "配置成功，正在唤醒世界..."
+				if is_instance_valid(overlay_progress):
+					overlay_progress.visible = true
+				# 关键修复：标记为已提交，避免重新轮询时状态不对又弹一次
+				_is_polling = false
+				if is_instance_valid(vbox): vbox.queue_free()
+				
+				# 延迟 1 秒再重新开始轮询，等待后端状态切换
+				await get_tree().create_timer(1.0).timeout
+				_poll_init_status()
+			else:
+				btn.disabled = false
+				btn.text = "保存失败，请查看控制台或重试"
+			http.queue_free()
+		)
+		
+		var payload = {
+			"api_key": key,
+			"base_url": "https://open.bigmodel.cn/api/paas/v4",
+			"model": "glm-4-flash"
+		}
+		http.request("http://127.0.0.1:8000/config/set_key", 
+			["Content-Type: application/json"], 
+			HTTPClient.METHOD_POST, 
+			JSON.stringify(payload)
+		)
+	)
 
 func _ready() -> void:
 	# 全局主题
@@ -1029,13 +1132,11 @@ func _on_loading_tick() -> void:
 	var elapsed := (Time.get_ticks_msec() - loading_started_ms) / 1000.0
 	loading_label.text = "⏳ %s (%.1fs)" % [loading_message, elapsed]
 
-	# 兜底：超过 90 秒强制清除
-	if elapsed > 90.0:
-		print("[ui] loading 超过 90 秒，强制清除")
-		is_step_24_running = false
-		step_24_done = 0
+	# 兜底：如果超过 120 秒还没响应，且不是在连续推进 24 回合，才强制清除
+	if elapsed > 120.0 and not is_step_24_running:
+		print("[ui] loading 超过 120 秒，强制清除")
 		_set_loading("")
-		status_label.text = "[color=red]请求超时（90s），请再试一次[/color]"
+		status_label.text = "[color=red]请求超时（120s），请再试一次[/color]"
 
 
 func _on_step_once() -> void:
@@ -1052,23 +1153,24 @@ func _on_trigger_event() -> void:
 
 func _on_step_24() -> void:
 	AudioManager.play_sfx("click")
+	if is_step_24_running:
+		return
 	is_step_24_running = true
 	step_24_done = 0
 	step24_btn.disabled = true
 	_set_loading("推进 24 回合 (0/24)")
-	_step_24_recursive(24)
-
-
-func _step_24_recursive(remaining: int) -> void:
-	if remaining <= 0:
-		is_step_24_running = false
-		step_24_done = 0
-		_set_loading("")
-		_refresh_all()
-		return
+	_set_player_interactable(false)
 	api.step_world()
-	await get_tree().create_timer(0.3).timeout
-	_step_24_recursive(remaining - 1)
+
+func _set_player_interactable(enabled: bool) -> void:
+	if travel_btn != null and is_instance_valid(travel_btn):
+		travel_btn.disabled = not enabled
+	if action_buttons_row != null:
+		for c in action_buttons_row.get_children():
+			if c is Button:
+				(c as Button).disabled = not enabled
+	if map_view != null:
+		map_view.mouse_filter = Control.MOUSE_FILTER_STOP if enabled else Control.MOUSE_FILTER_IGNORE
 
 
 func _refresh_all() -> void:
@@ -1373,17 +1475,45 @@ func _on_dialogue(data: Dictionary) -> void:
 # ================================================================
 
 func _on_event_triggered(data: Dictionary) -> void:
-	if is_step_24_running:
+	# 处理推进 24 回合的链式调用
+	# 如果产生了待处理事件，无论推到第几个，立刻中断批量推进
+	if is_step_24_running and bool(data.get("awaiting_player", false)):
+		is_step_24_running = false
+		step_24_done = 0
+		_set_loading("")
+		_set_player_interactable(true)
+		status_label.text = "[color=orange]推进被中断：有一件事需要你做出决定！[/color]"
+		# 继续往下走，触发 UI 刷新
+	elif is_step_24_running:
 		step_24_done += 1
-		_set_loading("推进 24 回合 (%d/24)" % step_24_done)
+		if step_24_done >= 24:
+			is_step_24_running = false
+			step_24_done = 0
+			_set_loading("")
+			_set_player_interactable(true)
+			_refresh_all()
+		else:
+			_set_loading("推进 24 回合 (%d/24)" % step_24_done)
+			await get_tree().create_timer(0.2).timeout
+			if is_step_24_running:
+				api.step_world()
+				return # 还没遇到事，继续闷头推
 	else:
 		_set_loading("")
 
 	var new_event_id: String = str(data.get("event", ""))
+	if new_event_id == "<null>" or new_event_id == "null":
+		new_event_id = ""
+		
+	var summary: String = str(data.get("event_summary", ""))
+	if summary == "<null>" or summary == "null":
+		summary = ""
+
 	if new_event_id != "" and not _is_refreshing:
 		AudioManager.play_sfx("success")
 	var tpl_label: String = str(data.get("template_label", ""))
-	var summary: String = str(data.get("event_summary", ""))
+	if tpl_label == "<null>" or tpl_label == "null":
+		tpl_label = ""
 	var awaiting: bool = bool(data.get("awaiting_player", false))
 
 	# 先给用户一个明确的"刚刚发生了什么"提示
@@ -1398,6 +1528,7 @@ func _on_event_triggered(data: Dictionary) -> void:
 		if sd is Dictionary:
 			_render_social(sd)
 
+	# 刷新 UI（只有在不是连续推进时才刷新）
 	api.fetch_events(50)
 	api.fetch_rewards(20)
 	api.fetch_items(100)
@@ -1563,8 +1694,16 @@ func _render_event_entry(e: Dictionary, pending: bool) -> void:
 				"partial": "勉强",
 				"failure": "失败",
 			}.get(str(check.get("result", "")), "")
+			var result_color := "cyan"
+			if result_zh == "失败":
+				result_color = "red"
+			elif result_zh == "大成功":
+				result_color = "gold"
+				
 			event_log.append_text(
-				"    [color=cyan]%s %d + 骰 %d = %d vs 难度 %d → [b]%s[/b][/color]\n" % [
+				"    [color=%s]%s %d + 骰 %d = %d vs 难度 %d → [b]%s[/b][/color]
+" % [
+					result_color,
 					_attr_label_from_dict(check),
 					int(check.get("base", 0)),
 					int(check.get("roll", 0)),
@@ -1732,7 +1871,12 @@ func _on_reward_list(data: Array) -> void:
 		for r in groups[k]:
 			var v: float = float(r.get("value", 0))
 			var desc: String = _safe_str(r.get("description", ""))
-			reward_log.append_text("    %.2f  %s\n" % [v, _highlight_names(desc)])
+			# 如果描述为空，或者描述全是数字，前端直接过滤掉
+			if desc == "" or desc == "<null>" or desc.is_valid_float():
+				continue
+			# 去掉数字前缀，直接显示自然语言描述
+			reward_log.append_text("    %s
+" % _highlight_names(desc))
 		reward_log.append_text("\n")
 
 
@@ -2035,10 +2179,16 @@ func _on_chronicle_generated(data: Dictionary) -> void:
 
 func _on_request_failed(endpoint: String, error: String) -> void:
 	push_warning("Request failed: %s -> %s" % [endpoint, error])
-	
-	# 只有在遮罩消失（正常游戏中）才显示错误
 	if loading_overlay == null:
 		status_label.text = "[color=red]错误：%s[/color]" % error
+		
+	# 强行清理所有 loading 状态，防止 UI 锁死
+	is_step_24_running = false
+	step_24_done = 0
+	loading_message = ""
+	loading_timer.stop()
+	loading_label.text = ""
+	_set_player_interactable(true)
 
 func _on_explore_pressed() -> void:
 	if not player_created:
@@ -2183,6 +2333,9 @@ func _ensure_action_ui() -> void:
 func _on_action_pressed(action_name: String) -> void:
 	AudioManager.play_sfx("click")
 	if not player_created:
+		return
+	if is_step_24_running:
+		status_label.text = "[color=red]正在推进世界中，请稍候...[/color]"
 		return
 	# 禁用所有按钮
 	if action_buttons_row != null:
@@ -2352,25 +2505,33 @@ func _refresh_travel_options() -> void:
 	travel_option.clear()
 	var known: Array = player_data.get("known_locations", [])
 	var current_id: String = str(player_data.get("location_id", ""))
+	
+	var select_idx := 0
 	for k in known:
 		if not k is Dictionary:
 			continue
-		var label: String = str(k.get("label", k.get("id", "?")))
+		var loc_id := str(k.get("id", ""))
+		var label: String = str(k.get("label", loc_id))
 		if bool(k.get("current", false)):
 			label += "（你在这里）"
 		travel_option.add_item(label)
-		travel_option.set_item_metadata(travel_option.item_count - 1, str(k.get("id", "")))
-	# 默认选中第一个非当前位置
-	for i in range(travel_option.item_count):
-		var meta: String = str(travel_option.get_item_metadata(i))
-		if meta != current_id:
-			travel_option.select(i)
-			break
+		travel_option.set_item_metadata(travel_option.item_count - 1, loc_id)
+		
+		# 找到第一个不是当前位置的选项，作为默认首选
+		if loc_id != current_id:
+			select_idx = travel_option.item_count - 1
+			
+	# 只要下拉框里有东西，必定选中一项，防止出现空白
+	if travel_option.item_count > 0:
+		travel_option.select(select_idx)
 
 
 func _on_travel_pressed() -> void:
 	AudioManager.play_sfx("click")
 	if not player_created or travel_option == null:
+		return
+	if is_step_24_running:
+		status_label.text = "[color=red]正在推进世界中，请稍候...[/color]"
 		return
 	var idx := travel_option.selected
 	if idx < 0:
@@ -2379,7 +2540,8 @@ func _on_travel_pressed() -> void:
 	if loc_id == "":
 		return
 	travel_btn.disabled = true
-	travel_result_label.text = "[i]你启程了...[/i]"
+	if travel_result_label != null and is_instance_valid(travel_result_label):
+		travel_result_label.text = "[i]你启程了...[/i]"
 	api.travel(loc_id)
 
 
@@ -2783,6 +2945,9 @@ func _on_map_location_clicked(location_id: String) -> void:
 	AudioManager.play_sfx("click")
 	if not player_created:
 		return
+	if is_step_24_running:
+		status_label.text = "[color=red]正在推进世界中，请稍候...[/color]"
+		return
 	var cur_loc: String = str(player_data.get("location_id", ""))
 	if location_id == cur_loc:
 		status_label.text = "[color=gray]你已经在这里了[/color]"
@@ -2791,7 +2956,7 @@ func _on_map_location_clicked(location_id: String) -> void:
 	print("[ui] 地图点击前往：%s" % location_id)
 	if travel_btn != null and is_instance_valid(travel_btn):
 		travel_btn.disabled = true
-	if travel_result_label != null:
+	if travel_result_label != null and is_instance_valid(travel_result_label):
 		travel_result_label.text = "[i]你启程了...[/i]"
 	api.travel(location_id)
 

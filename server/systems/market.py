@@ -26,6 +26,10 @@ SHOP_POOL = [
     ("绳索", "工具", 0.16),
     ("皮囊", "工具", 0.30),
     ("盐巴", "食材", 0.10),
+    # 新增：生存与恢复
+    ("金疮药", "药材", 0.50),
+    ("烧鸡", "食材", 0.25),
+    ("清酒", "酒", 0.20),
 ]
 
 SEASON_PRICE_MULT = {
@@ -36,8 +40,8 @@ SEASON_PRICE_MULT = {
 }
 
 # 卖出价倍率 / 买入价倍率
-SELL_MULT = 10
-BUY_MULT = 15
+SELL_MULT = 8
+BUY_MULT = 12
 
 
 def get_market_inventory(world: World, rng: random.Random, session=None) -> list[dict]:

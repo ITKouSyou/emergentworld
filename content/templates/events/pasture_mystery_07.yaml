@@ -1,0 +1,19 @@
+id: pasture_mystery_07
+label: 牧场谜影
+tags:
+- mystery
+- daily
+cooldown: 10
+weight: 1.0
+conditions: []
+params:
+  participant_count: 2
+  location: pasture
+prompt: 月光下，牧场中突然出现一具无头尸体，两名冒险者【participant_a】和【participant_b】被卷入其中。他们必须解开死者手中的神秘符咒，才能找到凶手隐藏的宝藏。
+evaluator:
+  require:
+  - participant_a
+  - participant_b
+  - clue
+  max_reward: 0.2
+interactive: true

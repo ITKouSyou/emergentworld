@@ -1,0 +1,21 @@
+id: river_bend_mystery_01
+label: 弯道之谜
+tags:
+- mystery
+- survival
+- forest
+- daily
+cooldown: 10
+weight: 1.0
+conditions: []
+params:
+  participant_count: 2
+  location: river_bend
+prompt: 在河湾的幽暗阴影中，两位旅人偶遇一艘神秘的空船，船上的日志暗示着不为人知的宝藏即将浮出水面。他们决定一探究竟，但命运似乎在暗中作祟，一场冒险由此展开。
+evaluator:
+  require:
+  - participant_a
+  - participant_b
+  - clue
+  max_reward: 0.2
+interactive: true

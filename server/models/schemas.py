@@ -109,6 +109,7 @@ class Event(BaseModel):
 
 class EventTemplate(BaseModel):
     id: str
+    label: str = ""
     tags: list[str] = Field(default_factory=list)
     cooldown: int = 3
     weight: float = 1.0

@@ -63,8 +63,22 @@ except Exception as e:
     dist_dir = Path("dist/EmergentWorldServer")
     shutil.copytree("server", dist_dir / "server", dirs_exist_ok=True)
     
-    if Path(".env").exists():
-        shutil.copy2(".env", dist_dir / ".env")
+    # 把整个 content 目录也复制到 exe 同级目录
+    if Path("content").exists():
+        shutil.copytree("content", dist_dir / "content", dirs_exist_ok=True)
+        print("[OK] content 目录已复制")
+    
+    # 写入一个干净的、留空的 .env 给玩家，保护你的真实 Key
+    clean_env = """LLM_API_KEY=
+LLM_BASE_URL=https://open.bigmodel.cn/api/paas/v4
+LLM_MODEL=glm-4-flash
+DB_PATH=data/world.db
+CACHE_DIR=.cache/llm
+SEED=42
+LOG_LEVEL=INFO
+"""
+    (dist_dir / ".env").write_text(clean_env, encoding="utf-8")
+    print("[OK] 已生成干净的空 .env 文件")
 
     game_exe = Path("client/Game.exe")
     if not game_exe.exists():
@@ -80,13 +94,27 @@ except Exception as e:
 
     print("=== 5. 生成一键静默启动器 ===")
     bat_content = """@echo off
+:: 强制切换到当前脚本所在的目录，保证后端能找到 content 文件夹
+cd /d "%~dp0"
+
+:: 先启动后端
+start "" "EmergentWorldServer.exe"
+
+:: 等待 2 秒，给后端初始化的时间
+timeout /t 2 /nobreak >nul
+
+:: 启动前端
 start "" "Game.exe"
-start /b "" "EmergentWorldServer.exe"
-:wait_loop
-timeout /t 3 /nobreak >nul
-tasklist | findstr "EmergentWorldServer.exe" >nul
-if errorlevel 1 exit
-goto wait_loop
+
+:: 等待玩家关闭前端窗口
+:wait_game
+timeout /t 2 /nobreak >nul
+tasklist | findstr "Game.exe" >nul
+if not errorlevel 1 goto wait_game
+
+:: 前端已退出，立刻强制杀死后端进程
+taskkill /F /IM EmergentWorldServer.exe /T >nul 2>&1
+exit
 """
     (dist_dir / "启动游戏.bat").write_text(bat_content, encoding="gbk")
 

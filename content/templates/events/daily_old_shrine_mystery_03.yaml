@@ -1,0 +1,19 @@
+id: old_shrine_mystery_03
+label: 古庙迷踪
+tags:
+- daily
+- mystery
+cooldown: 10
+weight: 1.0
+conditions: []
+params:
+  participant_count: 2
+  location: old_shrine
+prompt: 月光下，古老神庙中突然传来一声低沉的吟唱，两位勇士被神秘力量召唤而来。他们必须解开古老的诅咒，否则神庙将永陷黑暗。
+evaluator:
+  require:
+  - participant_a
+  - participant_b
+  - clue
+  max_reward: 0.2
+interactive: true

@@ -1,0 +1,19 @@
+id: old_mine_ritual_conflict_15
+label: 矿洞仪式
+tags:
+- conflict
+- ritual
+cooldown: 10
+weight: 1.0
+conditions: []
+params:
+  participant_count: 2
+  location: old_mine
+prompt: 在荒废的矿洞深处，一场古老的仪式正在秘密进行。参与者A与参与者B意外相遇，仪式的中心石台突然裂开，一道神秘的光芒穿透黑暗，似乎在呼唤着未知的危险。他们必须抉择：继续仪式，还是逃离这个充满诅咒的地方？
+evaluator:
+  require:
+  - participant_a
+  - participant_b
+  - clue
+  max_reward: 0.2
+interactive: true

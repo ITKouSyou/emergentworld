@@ -1,0 +1,19 @@
+id: hot_spring_combat_18
+label: 温泉秘影
+tags:
+- combat
+- ritual
+cooldown: 10
+weight: 1.0
+conditions: []
+params:
+  participant_count: 2
+  location: hot_spring
+prompt: 在神秘的温泉深处，一场古老的仪式正在进行。参与者之一突然发现，温泉中隐藏着一位沉睡的古老守护者，它似乎在等待着某个特定的时刻醒来。是继续仪式，还是唤醒沉睡的守护者，一场抉择即将展开。
+evaluator:
+  require:
+  - participant_a
+  - participant_b
+  - clue
+  max_reward: 0.2
+interactive: true

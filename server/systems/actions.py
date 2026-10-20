@@ -145,11 +145,37 @@ def add_discovered(session: Session, world_id: str, loc_id: str) -> None:
 
 
 def _make_item(name: str, kind: str, story: str, rng: random.Random) -> dict:
-    affixes = rng.sample(["古老的", "磨损的", "新鲜的", "常见的"], 1)
+    # 按物品类别定义基础价值区间 (min, max)
+    value_ranges = {
+        "猎物": (0.8, 2.0),    # 野兔、山鸡等
+        "食材": (0.1, 0.4),    # 松果、鱼虾等
+        "草药": (0.5, 1.5),    # 野草、青苔等
+        "药材": (2.0, 5.0),    # 鹿茸、百年参等
+        "矿石": (1.0, 3.0),    # 铁矿、寒石等
+        "古物": (3.0, 8.0),    # 旧铜钱、古钱等
+        "杂物": (0.05, 0.2),   # 石子、木屑等
+        "材料": (0.3, 0.8),    # 柴火、断船木等
+        "信物": (1.0, 5.0),    # 护身符、香灰等
+        "肥料": (0.05, 0.1),   # 羊粪等
+    }
+    vmin, vmax = value_ranges.get(kind, (0.2, 0.8))
+    
+    # 词缀影响价格倍率
+    affix = rng.choice(["古老的", "磨损的", "新鲜的", "常见的"])
+    mult = 1.0
+    if affix == "古老的":
+        mult = 2.5
+    elif affix == "新鲜的":
+        mult = 1.2
+    elif affix == "磨损的":
+        mult = 0.8
+
+    val = rng.uniform(vmin, vmax) * mult
+    
     return {
         "id": "itm_%s" % uuid.uuid4().hex[:8],
-        "name": name, "kind": kind, "affixes": affixes,
-        "story": story, "value": round(rng.uniform(0.05, 0.4), 2),
+        "name": name, "kind": kind, "affixes": [affix],
+        "story": story, "value": round(val, 2),
     }
 
 

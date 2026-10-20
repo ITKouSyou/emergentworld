@@ -1,0 +1,19 @@
+id: forest_plot_16
+label: 迷雾幽影
+tags:
+- forest
+- plot
+cooldown: 10
+weight: 1.0
+conditions: []
+params:
+  participant_count: 2
+  location: river_bend
+prompt: 在河弯处，一片迷雾突然升起，两名探险者发现了一个古老的卷轴，卷轴上描绘着一幅神秘地图，地图中心却出现了一道裂痕。他们必须决定是修复裂痕揭开地图的秘密，还是继续前行，却不知前方等待他们的将是命运的考验。
+evaluator:
+  require:
+  - participant_a
+  - participant_b
+  - clue
+  max_reward: 0.2
+interactive: true

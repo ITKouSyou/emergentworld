@@ -4,7 +4,7 @@ from __future__ import annotations
 import random
 import uuid
 
-from server.core.evaluator import evaluate_npc
+from server.core.evaluator import EvalPipeline, NPCGoalEvaluator, evaluate_npc
 from server.generators.base import get_llm, load_prompt
 from server.models.schemas import NPC
 
@@ -171,55 +171,59 @@ COMMON_KEYWORDS = [
 
 async def generate_npc(seed_name: str, context: str = "", gender: str = "unknown") -> NPC:
     npc_id = "npc_%s" % uuid.uuid4().hex[:8]
-    fallback = _default_npc(npc_id, seed_name, gender)
+    
+    # 1. 先把原本的兜底 NPC 生成好，作为最终降级方案
+    fallback_npc = _default_npc(npc_id, seed_name, gender)
 
-    prompt = load_prompt("npc_gen.md").format(
-        name=seed_name, gender=gender_zh(gender), context=context,
+    # 2. 构建评估器链 (复用你的业务逻辑)
+    pipeline = EvalPipeline(
+        evaluators=[NPCGoalEvaluator()], 
+        max_retry=2, 
+        pass_score=0.65
     )
-    npc = await get_llm().json(prompt, NPC, fallback=fallback)
-    npc.id = npc_id
-    npc.name = npc.name or seed_name
+    
+    ctx = {"name": seed_name, "gender": gender, "context": context}
 
-    # 名字推断性别 vs 传入性别，冲突时以名字为准
-    name_gender = _guess_gender(npc.name)
-    if name_gender != "unknown":
-        if gender != "unknown" and name_gender != gender:
-            print("[npc] %s 名字性别 %s 与传入 %s 冲突，用名字" % (
-                npc.name, name_gender, gender))
-        npc.gender = name_gender
-    elif gender != "unknown":
-        npc.gender = gender
+    # 3. 定义生成函数 (带有反馈拼接)
+    async def _gen(ctx_data: dict, feedback: list) -> NPC:
+        prompt = load_prompt("npc_gen.md").format(
+            name=ctx_data["name"], gender=gender_zh(ctx_data["gender"]), context=ctx_data["context"],
+        )
+        if feedback:
+            prompt += "\n\n【上一次生成存在以下问题，请务必改正】：\n"
+            for hint in feedback:
+                prompt += f"- {hint}\n"
+                
+        # 调真实的异步 LLM
+        npc = await get_llm().json(prompt, NPC, fallback=fallback_npc)
+        
+        # 把你原本的推断逻辑搬到这里，确保 LLM 出来的数据先经过清洗
+        npc.id = npc_id
+        npc.name = npc.name or seed_name
+        
+        name_gender = _guess_gender(npc.name)
+        if name_gender != "unknown":
+            npc.gender = name_gender
+        elif ctx_data["gender"] != "unknown":
+            npc.gender = ctx_data["gender"]
+            
+        return npc
 
-    # 强制覆盖一次，避免 LLM 乱写
-    if gender != "unknown":
-        npc.gender = gender if name_gender == "unknown" else name_gender
+    # 4. 定义最终降级函数
+    def _fallback(ctx_data: dict) -> NPC:
+        print(f"[npc] {seed_name} 触发兜底")
+        return fallback_npc
 
-    def _is_common(g: str) -> bool:
-        return any(kw in g for kw in COMMON_KEYWORDS)
+    # 5. 运行 Pipeline
+    final_npc, history = await pipeline.run_async(_gen, ctx, _fallback)
 
-    # 校验：套话 or 性别不匹配 or 空 → 用 fallback 池
-    need_replace = False
-    reason = ""
-    if not npc.goals:
-        need_replace = True
-        reason = "空 goals"
-    elif all(_is_common(g) for g in npc.goals):
-        need_replace = True
-        reason = "套话"
-    elif _goals_gender_mismatch(npc.goals, npc.gender, npc.age):
-        need_replace = True
-        reason = "性别/年龄不匹配"
-
-    if need_replace:
-        rng2 = random.Random(uuid.uuid4().int)
-        npc.goals = _pick_goals(npc.gender, npc.age, rng2)
-        print("[npc] %s（%s %d岁）的 goals %s，替换为 %r" % (
-            npc.name, npc.gender, npc.age, reason, npc.goals))
-    else:
-        print("[npc] %s（%s %d岁）的 goals: %r" % (
-            npc.name, npc.gender, npc.age, npc.goals))
-
-    ok, _ = evaluate_npc(npc)
+    # 6. 最后的双层保险 (调用你原有的评估逻辑)
+    ok, _ = evaluate_npc(final_npc)
     if not ok:
-        return fallback
-    return npc
+        return fallback_npc
+        
+    # 打印评估记录，方便你在终端看谁翻车了
+    if history and not all(r.passed for r in history):
+        print(f"[npc-eval] {final_npc.name} 经过重试后通过。失败记录: {[r.reasons for r in history if r.reasons]}")
+
+    return final_npc

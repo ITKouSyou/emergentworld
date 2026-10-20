@@ -1,0 +1,19 @@
+id: market_rival_08
+label: 市集争锋
+tags:
+- plot
+- daily
+cooldown: 10
+weight: 1.0
+conditions: []
+params:
+  participant_count: 2
+  location: market
+prompt: 在热闹非凡的市集，两位商人因货物纠纷引发争执，一位神秘的路人似乎知晓背后秘密，而你的选择将影响事态发展。
+evaluator:
+  require:
+  - participant_a
+  - participant_b
+  - clue
+  max_reward: 0.2
+interactive: true

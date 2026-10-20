@@ -1,0 +1,19 @@
+id: stone_forest_combat_05
+label: 石林谜影
+tags:
+- mystery
+- combat
+cooldown: 10
+weight: 1.0
+conditions: []
+params:
+  participant_count: 2
+  location: stone_forest
+prompt: 在石林深处，一场古老诅咒的觉醒引发了一场激烈的战斗。一位探险者意外发现了一块神秘的石碑，上面刻有古老文字，而另一名战士则被一股神秘力量所吸引，双方陷入了一场生死对决。
+evaluator:
+  require:
+  - participant_a
+  - participant_b
+  - clue
+  max_reward: 0.2
+interactive: true

@@ -1,0 +1,19 @@
+id: forest_combat_03
+label: 荒石决斗
+tags:
+- forest
+- combat
+cooldown: 10
+weight: 1.0
+conditions: []
+params:
+  participant_count: 2
+  location: stone_forest
+prompt: 在古老的石林深处，两位神秘旅者不期而遇。一个手持暗器，眼神深邃；另一个挥舞战斧，气息凛冽。石林中似乎隐藏着古老诅咒，他们不得不在这片荒芜之地一决胜负。在这场石林决斗中，谁能破解诅咒的秘密？
+evaluator:
+  require:
+  - participant_a
+  - participant_b
+  - clue
+  max_reward: 0.2
+interactive: true

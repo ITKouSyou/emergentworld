@@ -90,15 +90,28 @@ async def fill_event(
     payload = fallback
     try:
         raw = await get_llm().text_json(prompt)
-        if isinstance(raw, dict):
-            candidate = raw.get("payload") if "payload" in raw else raw
-            if isinstance(candidate, dict) and candidate.get("summary"):
-                payload = {
-                    "summary": str(candidate.get("summary", ""))[:300],
-                    "narrative": str(candidate.get("narrative", ""))[:800],
-                }
-    except Exception:
-        payload = fallback
+        if not isinstance(raw, dict):
+            raise ValueError("LLM 返回的不是字典")
+            
+        candidate = raw.get("payload") if "payload" in raw else raw
+        if not isinstance(candidate, dict):
+            raise ValueError("LLM 返回的 payload 不是字典")
+            
+        summary = str(candidate.get("summary", "")).strip()
+        narrative = str(candidate.get("narrative", "")).strip()
+        
+        # 强力防空壳拦截
+        if len(summary) < 5 or len(narrative) < 10:
+            raise ValueError(f"生成内容太短: summary='{summary}', narrative='{narrative}'")
+            
+        payload = {
+            "summary": summary[:300],
+            "narrative": narrative[:800],
+        }
+    except Exception as e:
+        print(f"[fill_event] LLM 生成异常: {e}")
+        # 向上抛出异常，让外面的 EvalPipeline 捕获并触发重试！
+        raise e 
 
     return Event(
         id="evt_%s" % uuid.uuid4().hex[:8],
