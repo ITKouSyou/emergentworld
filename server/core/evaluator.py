@@ -211,7 +211,7 @@ class EventLogicEvaluator(BaseEvaluator):
             
         # 3. 废除硬性长度限制，改为极短的软限制（比如少于 8 个字才打回）
         # 像“孩子在玩耍”这种短描述是完全合法且合理的
-        if len(text) < 8:
+        if len(text) < 4:
             return EvalResult(self.name, 0.4, ["文本极短"], "描述实在太短了，请至少写一句完整的话。")
             
         # 4. 可用性校验（如果事件要求玩家选择，必须提供选项）

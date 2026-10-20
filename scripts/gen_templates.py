@@ -44,7 +44,7 @@ PROMPT_TEMPLATE = """你是一个顶级的游戏文案策划。请为文字 RPG 
     "participant_count": 2,
     "location": "{location_id}"
   }},
-  "prompt": "用 2-3 句话描述这个事件的起因和冲突，必须有悬念或抉择。要符合古代/中世纪奇幻风格。不要出现'作为AI'等现代口吻。",
+  "prompt": "用 2-3 句话描述这个事件的起因和冲突（例如：夏日炎热，几个村人相约到河湾戏水，有人不慎呛水，众人慌乱）。要求接地气、有具体的行为描写，不要用宏大的词汇，不要出现现代口吻。",
   "evaluator": {{
     "require": ["participant_a", "participant_b", "clue"],
     "max_reward": 0.2

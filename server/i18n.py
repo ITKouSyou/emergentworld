@@ -138,7 +138,18 @@ def need_label(k: str) -> str: return NEED_LABELS.get(k, k)
 def gender_label(k: str) -> str: return GENDER_LABELS.get(k, k)
 def season_label(k: str) -> str: return SEASON_LABELS.get(k, k)
 def weather_label(k: str) -> str: return WEATHER_LABELS.get(k, k)
-def template_label(k: str) -> str: return TEMPLATE_LABELS.get(k, k)
+def template_label(k: str) -> str:
+    if k in TEMPLATE_LABELS:
+        return TEMPLATE_LABELS[k]
+    try:
+        from server.core import director
+        for tpl in director.load_templates():
+            if tpl.id == k and getattr(tpl, "label", ""):
+                return tpl.label
+    except Exception:
+        pass
+    return k
+
 def location_label(k: str) -> str: return LOCATION_LABELS.get(k, k)
 def reward_kind_label(k: str) -> str: return REWARD_KIND_LABELS.get(k, k)
 def state_label(k: str) -> str: return STATE_LABELS.get(k, k)
